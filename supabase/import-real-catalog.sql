@@ -1,0 +1,63 @@
+-- Glow Home Decor — full catalog import (40 products)
+-- Includes: 4 categories with subcategories, placement style (رومیزی / کنار سالنی)
+-- for lamps, and size variants (for the product-page dropdown) where relevant.
+-- REQUIRES: migration-add-subcategory-photos.sql AND migration-style-variants.sql
+-- to have been run first. Safe to re-run any time (upsert by slug).
+
+insert into products (slug, name_fa, name_en, collection, subcategory, style, material, height_cm, price, price_provisional, in_stock, photo_url, photos, variants, colors, description)
+values
+  ('rosha', 'روشا', 'Rosha', 'lamps', 'سفالی', 'رومیزی', 'سفال', 60, 5500000, false, true, 'images/rosha.jpg', ARRAY['images/rosha.jpg','images/rosha-2.jpg','images/rosha-3.jpg','images/rosha-4.jpg']::text[], '[]'::jsonb, '{}'::text[], ''),
+  ('lale', 'لاله', 'Lale', 'lamps', 'سفالی', 'رومیزی', 'سفال', 55, 5500000, false, true, 'images/lale.jpg', ARRAY['images/lale.jpg','images/lale-2.jpg','images/lale-3.jpg']::text[], '[]'::jsonb, '{}'::text[], 'شید رافیا'),
+  ('aghaghia', 'اقاقیا رومیزی', 'Aghaghia Desk', 'lamps', 'سفالی', 'رومیزی', 'سفال', 60, 6500000, false, true, 'images/aghaghia.jpg', ARRAY['images/aghaghia.jpg','images/aghaghia-2.jpg','images/aghaghia-3.jpg']::text[], '[]'::jsonb, '{}'::text[], ''),
+  ('aghaghia-tall', 'اقاقیا کنار سالنی', 'Aghaghia Sofa-Side', 'lamps', 'سفالی', 'کنار سالنی', 'سفال', 140, 12980000, false, true, 'images/aghaghia-tall.jpg', ARRAY['images/aghaghia-tall.jpg','images/aghaghia-tall-2.jpg','images/aghaghia-tall-3.jpg']::text[], '[{"height": 140, "price": 12980000}, {"height": 120, "price": 9980000}, {"height": 100, "price": 9100000}, {"height": 80, "price": 7100000}]'::jsonb, '{}'::text[], ''),
+  ('deforme', 'دفرمه', 'Deforme', 'lamps', 'سفالی', 'کنار سالنی', 'سفال', 60, 6200000, false, true, 'images/deforme.jpg', ARRAY['images/deforme.jpg','images/deforme-2.jpg','images/deforme-3.jpg','images/deforme-4.jpg']::text[], '[{"height": 60, "price": 6200000},{"height": 80, "price": 7100000},{"height": 100, "price": 8980000},{"height": 130, "price": 13180000}]'::jsonb, '{}'::text[], 'نسخه‌ی شید گلدوزی‌شده: ۶۰ سانتی‌متر ۸,۷۰۰,۰۰۰ · ۸۰ سانتی‌متر ۹,۶۰۰,۰۰۰ · ۱۰۰ سانتی‌متر ۱۱,۴۸۰,۰۰۰ · ۱۳۰ سانتی‌متر ۱۵,۶۸۰,۰۰۰ تومان'),
+  ('gisoo', 'گیسو', 'Gisoo', 'lamps', 'سفالی', 'کنار سالنی', 'سفال', 80, 7100000, false, true, 'images/gisoo.jpg', ARRAY['images/gisoo.jpg','images/gisoo-2.jpg','images/gisoo-3.jpg']::text[], '[{"height": 80, "price": 7100000},{"height": 100, "price": 8980000},{"height": 130, "price": 13180000}]'::jsonb, '{}'::text[], ''),
+  ('shiari', 'شیاری', 'Shiari', 'lamps', 'سفالی', 'رومیزی', 'سفال', 55, 5100000, false, true, 'images/shiari.jpg', ARRAY['images/shiari.jpg','images/shiari-2.jpg','images/shiari-3.jpg']::text[], '[]'::jsonb, '{}'::text[], ''),
+  ('maha', 'مها', 'Maha', 'lamps', 'پلی استر', 'رومیزی', 'پلی‌استر', 60, 6500000, false, true, 'images/maha.jpg', ARRAY['images/maha.jpg','images/maha-2.jpg','images/maha-3.jpg','images/maha-4.jpg']::text[], '[]'::jsonb, '{}'::text[], ''),
+  ('gol-o-morgh', 'گل و مرغ', 'Gol-o-Morgh', 'lamps', 'سفالی', 'رومیزی', 'سفال', 60, 6980000, false, true, 'images/gol-o-morgh.jpg', ARRAY['images/gol-o-morgh.jpg','images/gol-o-morgh-2.jpg','images/gol-o-morgh-3.jpg']::text[], '[]'::jsonb, '{}'::text[], 'شید مکرومه'),
+  ('deforme-desk', 'دفرمه رومیزی', 'Deforme Desk', 'lamps', 'سفالی', 'رومیزی', 'سفال', 60, 5500000, false, true, 'images/deforme-desk.jpg', ARRAY['images/deforme-desk.jpg','images/deforme-desk-2.jpg','images/deforme-desk-3.jpg']::text[], '[]'::jsonb, '{}'::text[], 'شید گونی'),
+  ('delaram', 'دل‌آرام', 'Delaram', 'lamps', 'سفالی', 'رومیزی', 'سفال', 60, 6980000, false, true, 'images/delaram.jpg', ARRAY['images/delaram.jpg','images/delaram-2.jpg','images/delaram-3.jpg']::text[], '[]'::jsonb, '{}'::text[], 'شید رافیا'),
+  ('mahgol', 'مهگل', 'Mahgol', 'lamps', 'سفالی', 'رومیزی', 'سفال', 57, 5500000, false, true, 'images/mahgol.jpg', ARRAY['images/mahgol.jpg','images/mahgol-2.jpg']::text[], '[]'::jsonb, '{}'::text[], ''),
+  ('roz', 'رز', 'Roz', 'lamps', 'سفالی', 'رومیزی', 'سفال', 20, 5900000, false, true, 'images/roz.jpg', ARRAY['images/roz.jpg','images/roz-2.jpg','images/roz-3.jpg']::text[], '[]'::jsonb, ARRAY['زرشکی','سبز','صورتی','آبی','یاسی']::text[], 'شید متقال گلدوزی‌شده'),
+  ('nila', 'نیلا', 'Nila', 'lamps', 'سفالی', 'رومیزی', 'سفال', 100, 5500000, false, true, 'images/nila.jpg', ARRAY['images/nila.jpg','images/nila-2.jpg']::text[], '[]'::jsonb, '{}'::text[], 'نسخه‌ی شید گلدوزی‌شده: ۸,۵۰۰,۰۰۰ تومان'),
+  ('rojan', 'روژان', 'Rojan', 'lamps', 'سفالی', 'رومیزی', 'سفال', 45, 5500000, false, true, 'images/rojan.jpg', ARRAY['images/rojan.jpg','images/rojan-2.jpg']::text[], '[]'::jsonb, '{}'::text[], ''),
+  ('luna', 'لونا', 'Luna', 'lamps', 'سفالی', 'رومیزی', 'سفال', 45, 5500000, false, true, 'images/luna.jpg', ARRAY['images/luna.jpg','images/luna-2.jpg']::text[], '[]'::jsonb, '{}'::text[], ''),
+  ('tara', 'تارا', 'Tara', 'lamps', 'پلی استر', 'رومیزی', 'پلی‌استر', 28, 4500000, false, true, 'images/tara.jpg', ARRAY['images/tara.jpg','images/tara-2.jpg','images/tara-3.jpg']::text[], '[]'::jsonb, '{}'::text[], ''),
+  ('samin', 'ثمین', 'Samin', 'lamps', 'سفالی', 'رومیزی', 'سفال', 27, 4500000, false, true, 'images/samin.jpg', ARRAY['images/samin.jpg','images/samin-2.jpg','images/samin-3.jpg']::text[], '[]'::jsonb, ARRAY['یاسی','سبز','آبی']::text[], 'رنگ یاسی. رنگ‌های سبز و آبی هم موجود است'),
+  ('selin', 'سلین', 'Selin', 'lamps', 'سفالی', 'رومیزی', 'سفال', 25, 4500000, false, true, 'images/selin.jpg', ARRAY['images/selin.jpg']::text[], '[]'::jsonb, '{}'::text[], ''),
+  ('ava', 'آوا', 'Ava', 'lamps', 'چوبی', 'رومیزی', 'چوب گردو', 27, 5200000, false, true, 'images/ava.jpg', ARRAY['images/ava.jpg','images/ava-2.jpg']::text[], '[]'::jsonb, '{}'::text[], ''),
+  ('shade-cylinder', 'شید استوانه', 'Cylinder Shade', 'shades', 'ساده', NULL, 'متقال', 20, 2100000, false, true, 'images/shade-cylinder.jpg', ARRAY['images/shade-cylinder.jpg']::text[], '[]'::jsonb, '{}'::text[], 'قطر ۳۰ سانتی‌متر، طول ۲۰ سانتی‌متر'),
+  ('shade-raffia', 'شید رافیا', 'Raffia Shade', 'shades', 'ساده', NULL, 'رافیا', 20, 2500000, false, true, 'images/shade-raffia.jpg', ARRAY['images/shade-raffia.jpg']::text[], '[]'::jsonb, ARRAY['مشکی','قهوه‌ای تیره','نسکافه‌ای','شیری','سبز','اجری']::text[], 'قطر ۳۰ سانتی‌متر، طول ۲۰ سانتی‌متر'),
+  ('shade-cylinder-fabric', 'شید استوانه متقال', 'Fabric Cylinder Shade', 'shades', 'ساده', NULL, 'متقال', 50, 2800000, false, true, 'images/shade-cylinder-fabric.jpg', ARRAY['images/shade-cylinder-fabric.jpg']::text[], '[]'::jsonb, '{}'::text[], 'قطر ۲۰ سانتی‌متر، طول ۵۰ سانتی‌متر'),
+  ('shade-embroidered-cylinder', 'شید گلدوزی استوانه', 'Embroidered Cylinder Shade', 'shades', 'گلدوزی', NULL, 'متقال', 40, 3500000, false, true, 'images/shade-embroidered-cylinder.jpg', ARRAY['images/shade-embroidered-cylinder.jpg']::text[], '[]'::jsonb, '{}'::text[], 'قطر ۲۰ سانتی‌متر، طول ۴۰ سانتی‌متر'),
+  ('shade-embroidered-roz', 'شید گلدوزی رز', 'Embroidered Roz Shade', 'shades', 'گلدوزی', NULL, 'متقال', 15, 2500000, false, true, 'images/shade-embroidered-roz.jpg', ARRAY['images/shade-embroidered-roz.jpg']::text[], '[]'::jsonb, '{}'::text[], 'قطر ۱۵ سانتی‌متر، طول ۱۵ سانتی‌متر'),
+  ('shade-embroidered-3', 'شید گلدوزی شماره ۳', 'Embroidered Shade No.3', 'shades', 'گلدوزی', NULL, 'متقال', 20, 3500000, false, true, 'images/shade-embroidered-3.jpg', ARRAY['images/shade-embroidered-3.jpg']::text[], '[]'::jsonb, '{}'::text[], 'قطر ۳۵ سانتی‌متر، طول ۲۰ سانتی‌متر'),
+  ('incense-holder-round', 'جاعودی دایره‌ای', 'Round Incense Holder', 'decor', 'جا شمعی', NULL, 'پلی‌استر', NULL, 1500000, false, true, 'images/incense-holder-round.jpg', ARRAY['images/incense-holder-round.jpg','images/incense-holder-round-2.jpg','images/incense-holder-round-3.jpg']::text[], '[]'::jsonb, '{}'::text[], 'قابل استفاده با عود قلمی و عود آبشاری'),
+  ('pirex', 'ست سه‌تایی جاشمعی پیرکس قلمی', 'Pirex Taper Holder Set', 'decor', 'جا شمعی', NULL, 'پیرکس (شیشه)', 25, 2980000, false, true, 'images/pirex.jpg', ARRAY['images/pirex.jpg','images/pirex-2.jpg']::text[], '[]'::jsonb, '{}'::text[], 'در سه ارتفاع ۲۵، ۲۰ و ۱۵ سانتی‌متر'),
+  ('raha-set', 'ست پذیرایی رها', 'Raha Serving Set', 'decor', 'ست پذیرایی', NULL, 'پلی‌استر', NULL, 4500000, false, true, 'images/raha-set.jpg', ARRAY['images/raha-set.jpg','images/raha-set-2.jpg','images/raha-set-3.jpg']::text[], '[]'::jsonb, '{}'::text[], 'شامل گلدان و میوه‌خوری'),
+  ('rosha-set', 'ست دو تیکه پذیرایی روشا', 'Rosha Serving Set', 'decor', 'ست پذیرایی', NULL, 'پلی‌استر', NULL, 4980000, false, true, 'images/rosha-set.jpg', ARRAY['images/rosha-set.jpg','images/rosha-set-2.jpg','images/rosha-set-3.jpg']::text[], '[]'::jsonb, '{}'::text[], 'ست دو تکه پذیرایی، هم‌خانواده با آباژور روشا'),
+  ('abrak', 'ابرک', 'Abrak', 'candles', 'شاتی', NULL, 'موم طبیعی نارگیل', NULL, 855000, false, true, 'images/abrak.jpg', ARRAY['images/abrak.jpg','images/abrak-2.jpg','images/abrak-3.jpg']::text[], '[]'::jsonb, '{}'::text[], 'پایه سنگ مصنوعی، فروش تکی'),
+  ('baloot', 'بلوط', 'Baloot', 'candles', 'شاتی', NULL, 'موم طبیعی نارگیل', NULL, 855000, false, true, 'images/baloot.jpg', ARRAY['images/baloot.jpg','images/baloot-2.jpg']::text[], '[]'::jsonb, '{}'::text[], 'پایه سنگ مصنوعی، فروش تکی'),
+  ('candle-bahar', 'شمع بهار', 'Bahar Candle', 'candles', 'شاتی', NULL, 'موم طبیعی نارگیل', NULL, 855000, false, true, 'images/candle-bahar.jpg', ARRAY['images/candle-bahar.jpg','images/candle-bahar-2.jpg','images/candle-bahar-3.jpg','images/candle-bahar-4.jpg']::text[], '[]'::jsonb, '{}'::text[], 'پایه سنگ مصنوعی، فروش تکی'),
+  ('hobabi', 'حبابی', 'Hobabi', 'candles', 'شاتی', NULL, 'موم طبیعی نارگیل', NULL, 855000, false, true, 'images/hobabi.jpg', ARRAY['images/hobabi.jpg','images/hobabi-2.jpg']::text[], '[]'::jsonb, '{}'::text[], 'پایه سنگ مصنوعی، فروش تکی'),
+  ('candle-girl', 'شمع دختر', 'Girl Candle', 'candles', 'شاتی', NULL, 'موم طبیعی نارگیل', NULL, 855000, false, true, 'images/candle-girl.jpg', ARRAY['images/candle-girl.jpg','images/candle-girl-2.jpg']::text[], '[]'::jsonb, '{}'::text[], 'پایه سنگ مصنوعی، فروش تکی'),
+  ('candle-polygon', 'شمع چندضلعی', 'Polygon Candle', 'candles', 'شاتی', NULL, 'موم طبیعی نارگیل', NULL, 855000, false, true, 'images/candle-polygon.jpg', ARRAY['images/candle-polygon.jpg','images/candle-polygon-2.jpg']::text[], '[]'::jsonb, '{}'::text[], 'پایه سنگ مصنوعی، فروش تکی'),
+  ('candle-pumpkin', 'شمع کدو', 'Pumpkin Candle', 'candles', 'شاتی', NULL, 'موم طبیعی نارگیل', NULL, 855000, false, true, 'images/candle-pumpkin.jpg', ARRAY['images/candle-pumpkin.jpg','images/candle-pumpkin-2.jpg','images/candle-pumpkin-3.jpg']::text[], '[]'::jsonb, '{}'::text[], 'پایه سنگ مصنوعی، فروش تکی'),
+  ('roz-gift', 'گیفت رز', 'Roz Gift', 'candles', 'شاتی', NULL, 'موم طبیعی نارگیل', NULL, 110000, false, true, 'images/roz-gift.jpg', ARRAY['images/roz-gift.jpg','images/roz-gift-2.jpg','images/roz-gift-3.jpg']::text[], '[]'::jsonb, '{}'::text[], 'بسته‌بندی سلفون. نسخه‌ی تور: ۱۵۰,۰۰۰ تومان. قابل سفارش با کارت اختصاصی — هماهنگی از طریق دایرکت یا تلگرام'),
+  ('lale-taper', 'قلمی لاله', 'Lale Taper', 'candles', 'قلمی', NULL, 'موم طبیعی نارگیل', 30, 980000, false, true, 'images/lale-taper.jpg', ARRAY['images/lale-taper.jpg','images/lale-taper-2.jpg','images/lale-taper-3.jpg']::text[], '[]'::jsonb, '{}'::text[], 'شمع قلمی جفتی، الهام‌گرفته از لاله')
+on conflict (slug) do update set
+  name_fa = excluded.name_fa,
+  name_en = excluded.name_en,
+  collection = excluded.collection,
+  subcategory = excluded.subcategory,
+  style = excluded.style,
+  material = excluded.material,
+  height_cm = excluded.height_cm,
+  price = excluded.price,
+  in_stock = excluded.in_stock,
+  photo_url = excluded.photo_url,
+  photos = excluded.photos,
+  variants = excluded.variants,
+  colors = excluded.colors,
+  description = excluded.description,
+  updated_at = now();
