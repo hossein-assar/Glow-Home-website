@@ -18,13 +18,79 @@ const SUPABASE_URL = 'https://sgfoesnpodvwyzlxfhtq.supabase.co';
 // Mirrors data.js — kept in sync by hand since this is server-side business
 // logic, not sensitive data, and duplicating it here avoids needing a build
 // step to share code between the browser bundle and this function.
+//
+// Only two methods exist: which one applies is decided entirely by شهر (see
+// shippingMethodForCity below) — پست پیشتاز was retired because the
+// Tehran/non-Tehran rule left no city that could ever reach it.
 const SHIPPING = {
-  post: { label: 'پست پیشتاز', cost: 65000, payAtDoor: false },
   peyk: { label: 'پیک تهران', cost: 90000, payAtDoor: false },
   tipax: { label: 'تیپاکس', cost: 0, payAtDoor: true },
 };
 const FREE_SHIP_OVER = 3000000;
 const DISCOUNT_CODES = { GLOW10: 0.1, HANDMADE15: 0.15 };
+
+const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
+const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩'; // Arabic-Indic — some keyboards/OSes produce these instead of ۰-۹
+
+// Mirrors the same-named helpers in app.js — see there for the reasoning;
+// duplicated here so the server never has to trust the client's own
+// normalization of what it typed.
+function toLatinDigits(s) {
+  return String(s ?? '').replace(/[۰-۹٠-٩]/g, (d) => {
+    const fa = FA_DIGITS.indexOf(d);
+    if (fa !== -1) return String(fa);
+    return String(AR_DIGITS.indexOf(d));
+  });
+}
+
+function isValidPostcode(raw) {
+  return /^[0-9]{10}$/.test(toLatinDigits(raw).trim());
+}
+
+function normalizePostcode(raw) {
+  return toLatinDigits(raw).trim();
+}
+
+// Phone numbers, unlike postcode, are NOT auto-converted from Persian/
+// Arabic-Indic digits — the caller must reject those first (see
+// containsPersianOrArabicDigits below) rather than have this silently
+// convert them, so this expects English digits only.
+function containsPersianOrArabicDigits(raw) {
+  return /[۰-۹٠-٩]/.test(String(raw ?? ''));
+}
+
+function iranPhoneSubscriberPart(raw) {
+  let v = String(raw ?? '').replace(/\s+/g, '');
+  if (v.startsWith('+98')) v = v.slice(3);
+  else if (v.startsWith('0098')) v = v.slice(4);
+  else if (v.startsWith('98') && v.length === 12) v = v.slice(2);
+  else if (v.startsWith('0')) v = v.slice(1);
+  return /^9[0-9]{9}$/.test(v) ? v : null;
+}
+
+function isValidIranPhone(raw) {
+  return iranPhoneSubscriberPart(raw) !== null;
+}
+
+function normalizeIranPhone(raw) {
+  const sub = iranPhoneSubscriberPart(raw);
+  return sub ? '0' + sub : String(raw ?? '').trim();
+}
+
+function normalizePersianText(s) {
+  return String(s ?? '')
+    .replace(/[‌‎‏]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[يى]/g, 'ی')
+    .replace(/ك/g, 'ک');
+}
+
+// The only source of truth for which method an order gets — the client's
+// own shipping_method choice is never trusted (see the call site below).
+function shippingMethodForCity(rawCity) {
+  return normalizePersianText(rawCity) === 'تهران' ? 'peyk' : 'tipax';
+}
 
 function parseCartKey(key) {
   const parts = String(key).split('::');
@@ -117,7 +183,9 @@ module.exports = async (req, res) => {
     }
   }
 
-  const { customer, note, items, shipping_method, discount_code } = body || {};
+  // shipping_method is intentionally NOT read from the body — see the
+  // "Shipping" section below, which derives it from city instead.
+  const { customer, note, items, discount_code } = body || {};
 
   // ---- Validate the shape of what came in -----------------------------
   if (!customer || typeof customer !== 'object') {
@@ -125,18 +193,29 @@ module.exports = async (req, res) => {
     return;
   }
   const name = String(customer.name || '').trim();
-  const phone = String(customer.phone || '').trim();
+  const phoneRaw = String(customer.phone || '').trim();
   const city = String(customer.city || '').trim();
   const address = String(customer.address || '').trim();
-  const postcode = String(customer.postcode || '').trim();
+  const postcodeRaw = String(customer.postcode || '').trim();
 
   if (!name) return res.status(400).json({ ok: false, error: 'نام و نام خانوادگی را وارد کنید.' });
-  if (phone.replace(/\D/g, '').length < 10)
-    return res.status(400).json({ ok: false, error: 'شماره موبایل را کامل وارد کنید.' });
+  if (containsPersianOrArabicDigits(phoneRaw))
+    return res.status(400).json({ ok: false, error: 'لطفاً شماره موبایل را با اعداد انگلیسی وارد کنید.' });
+  if (!isValidIranPhone(phoneRaw))
+    return res.status(400).json({ ok: false, error: 'شماره موبایل معتبر نیست.' });
   if (!city) return res.status(400).json({ ok: false, error: 'شهر را وارد کنید.' });
   if (address.length < 10) return res.status(400).json({ ok: false, error: 'نشانی را کامل‌تر بنویسید.' });
+  // کد پستی stays optional (nullable column) — but if one was sent, it must
+  // actually be a valid 10-digit code, same rule the browser enforces.
+  if (postcodeRaw && !isValidPostcode(postcodeRaw))
+    return res.status(400).json({ ok: false, error: 'کد پستی باید دقیقاً ۱۰ رقم باشد.' });
   if (!Array.isArray(items) || !items.length)
     return res.status(400).json({ ok: false, error: 'سبد خرید خالی است.' });
+
+  // Canonical stored formats — same numbers regardless of how the client
+  // typed or normalized them client-side.
+  const phone = normalizeIranPhone(phoneRaw);
+  const postcode = postcodeRaw ? normalizePostcode(postcodeRaw) : '';
 
   const sb = createClient(SUPABASE_URL, serviceKey);
 
@@ -188,8 +267,14 @@ module.exports = async (req, res) => {
   const discount = Math.round(subtotal * rate);
   const base = subtotal - discount;
 
-  // ---- Shipping ------------------------------------------------------------
-  const method = SHIPPING[shipping_method] || SHIPPING.post;
+  // ---- Shipping --------------------------------------------------------
+  // Derived from شهر, not taken from the client's shipping_method — same
+  // reasoning as prices/stock above: city is the one thing that actually
+  // determines which courier can fulfill the order, so it's not the
+  // client's choice to make. An old/stale client sending "post" (retired)
+  // or any other value has no effect either way.
+  const resolvedShippingMethod = shippingMethodForCity(city);
+  const method = SHIPPING[resolvedShippingMethod];
   const freeShip = !method.payAtDoor && base >= FREE_SHIP_OVER;
   const shipCost = method.payAtDoor || freeShip ? 0 : method.cost;
   const total = base + shipCost;
@@ -216,7 +301,7 @@ module.exports = async (req, res) => {
       address,
       postcode: postcode || null,
       note: note ? String(note).trim() || null : null,
-      shipping_method: shipping_method || 'post',
+      shipping_method: resolvedShippingMethod,
       shipping_cost: shipCost,
       discount_code: code,
       subtotal,

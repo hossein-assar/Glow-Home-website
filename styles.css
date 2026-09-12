@@ -1034,6 +1034,7 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
   cursor: pointer;
 }
 .option[aria-checked='true'] { border: 2px solid var(--color-neutral-900); background: var(--color-bg); padding: 14px 17px; }
+.option:disabled { opacity: 0.45; cursor: not-allowed; }
 .option b { display: block; font-size: 15.5px; font-weight: 700; }
 .option span { font-size: 13.5px; color: var(--color-neutral-600); }
 .option .opt-end { margin-inline-start: auto; font-size: 14.5px; font-weight: 500; white-space: nowrap; }

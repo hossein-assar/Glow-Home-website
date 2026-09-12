@@ -267,8 +267,11 @@ let PROVISIONAL = Object.fromEntries(PRODUCTS.map((p) => [p.id, PRICES_ARE_PROVI
 
 const FREE_SHIP_OVER = 3000000;
 
+// Which of these two applies is decided entirely by شهر at checkout — see
+// shippingMethodForCity() in app.js. پست پیشتاز was retired: the
+// Tehran-only-پیک / everywhere-else-تیپاکس rule left no city that could
+// ever reach it.
 const SHIPPING = [
-  { id: 'post', label: 'پست پیشتاز', note: '۳ تا ۵ روز کاری، سراسر ایران', cost: 65000, payAtDoor: false },
   { id: 'peyk', label: 'پیک تهران', note: 'همان روز، فقط داخل تهران', cost: 90000, payAtDoor: false },
   { id: 'tipax', label: 'تیپاکس', note: 'پس‌کرایه — هزینه را هنگام تحویل می‌پردازید', cost: 0, payAtDoor: true },
 ];

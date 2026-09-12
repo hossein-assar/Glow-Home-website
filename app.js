@@ -7,12 +7,93 @@
 /* ---- Helpers ------------------------------------------------------------ */
 
 const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
+const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩'; // Arabic-Indic — some keyboards/OSes produce these instead of ۰-۹
 
 /** Convert Latin digits to Persian digits. */
 const FA = (s) => String(s).replace(/[0-9]/g, (d) => FA_DIGITS[d]);
 
+/** Convert Persian or Arabic-Indic digits to Latin digits (leaves everything else untouched). */
+function toLatinDigits(s) {
+  return String(s ?? '').replace(/[۰-۹٠-٩]/g, (d) => {
+    const fa = FA_DIGITS.indexOf(d);
+    if (fa !== -1) return String(fa);
+    return String(AR_DIGITS.indexOf(d));
+  });
+}
+
 /** Format a toman amount with Persian digits and Persian thousands marks. */
 const money = (n) => FA(Number(n).toLocaleString('en-US').replace(/,/g, '٬')) + ' تومان';
+
+/** Digits-only Iranian postal code check: exactly 10 digits after numeral normalization. */
+function isValidPostcode(raw) {
+  return /^[0-9]{10}$/.test(toLatinDigits(raw).trim());
+}
+
+/** Normalized 10-digit postal code (Latin digits) — call only after isValidPostcode() passes. */
+function normalizePostcode(raw) {
+  return toLatinDigits(raw).trim();
+}
+
+/** True if the string has any Persian (۰-۹) or Arabic-Indic (٠-٩) digit.
+ * Phone numbers deliberately do NOT get auto-converted from these like
+ * postcode does — see containsPersianOrArabicDigits() call sites. */
+function containsPersianOrArabicDigits(raw) {
+  return /[۰-۹٠-٩]/.test(String(raw ?? ''));
+}
+
+/** Strip an Iranian mobile number down to its bare 10-digit subscriber part
+ * (starts with 9), accepting +98/0098/98/0 trunk-or-country prefixes and
+ * ignoring spaces — or null if what's left doesn't look like one. Handles
+ * "+98 912 345 6789", "0912 345 6789", "989123456789", "09123456789", ...
+ * Expects English digits only — callers must reject Persian/Arabic-Indic
+ * digits themselves first (containsPersianOrArabicDigits) rather than have
+ * this silently convert them the way postcode's helpers do. */
+function iranPhoneSubscriberPart(raw) {
+  let v = String(raw ?? '').replace(/\s+/g, '');
+  if (v.startsWith('+98')) v = v.slice(3);
+  else if (v.startsWith('0098')) v = v.slice(4);
+  else if (v.startsWith('98') && v.length === 12) v = v.slice(2);
+  else if (v.startsWith('0')) v = v.slice(1);
+  return /^9[0-9]{9}$/.test(v) ? v : null;
+}
+
+function isValidIranPhone(raw) {
+  return iranPhoneSubscriberPart(raw) !== null;
+}
+
+/** Canonical stored format: 09XXXXXXXXX. Call only after isValidIranPhone() passes. */
+function normalizeIranPhone(raw) {
+  const sub = iranPhoneSubscriberPart(raw);
+  return sub ? '0' + sub : String(raw ?? '').trim();
+}
+
+/** Trim, collapse whitespace, drop zero-width/direction marks, and unify the
+ * Arabic vs. Persian Yeh/Kaf variants so close variants of a typed city name
+ * compare equal (e.g. "تهران "، "ته‌ران" با نویسه‌ی عربی کاف/یاء). */
+function normalizePersianText(s) {
+  return String(s ?? '')
+    .replace(/[‌‎‏]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[يى]/g, 'ی')
+    .replace(/ك/g, 'ک');
+}
+
+/** The /track order-code field only ever asks for the part after "GH-" —
+ * this reconstructs the canonical GH-XXXX form the backend expects. Only
+ * whitespace and a leading GH-/gh- prefix are stripped, NOT letters:
+ * the normal code is numeric (GH-140001), but api/orders.js has a rare
+ * base-36 fallback path (letters included) for when its DB sequence RPC
+ * fails, and a customer stuck with one of those still needs to be able to
+ * type and look it up. The prefix strip repeats so a doubled-up paste like
+ * "GH-GH-140001" still reduces to "GH-140001" rather than "GH-GH-140001".
+ * Returns '' if nothing was left to track. */
+function buildOrderCode(raw) {
+  const v = String(raw ?? '')
+    .replace(/\s+/g, '')
+    .replace(/^(?:gh-?)+/i, '');
+  return v ? 'GH-' + v.toUpperCase() : '';
+}
 
 /** Escape text before it goes into innerHTML. */
 const esc = (s) =>
@@ -152,7 +233,7 @@ const state = {
   code: '',
   appliedCode: null,
   codeMsg: '',
-  ship: 'post',
+  ship: 'peyk', // placeholder until a city is entered — syncShippingToCity() then takes over
   pay: 'gateway',
   auth: 'guest',
   otpSent: false,
@@ -231,6 +312,24 @@ function cartKeyFor(p, height = p.height, colorIndex = 0) {
   if (p.variants && p.variants.length) key += '::h' + height;
   if (p.colors && p.colors.length > 1) key += '::c' + colorIndex;
   return key;
+}
+
+/** Which SHIPPING id is the only valid choice for a given city — 'peyk' for
+ * Tehran, 'tipax' for anywhere else, or null if city isn't filled in yet
+ * (nothing forced until then). See PROJECT_CONTEXT.md's shipping note. */
+function shippingMethodForCity(rawCity) {
+  const city = normalizePersianText(rawCity);
+  if (!city) return null;
+  return city === 'تهران' ? 'peyk' : 'tipax';
+}
+
+/** Keep state.ship in lock-step with whatever shippingMethodForCity(city)
+ * currently says — called wherever state.form.city can change, so a city
+ * edit after a shipping method was already picked overrides it rather than
+ * leaving a stale, now-invalid method selected. */
+function syncShippingToCity() {
+  const forced = shippingMethodForCity(state.form.city);
+  if (forced) state.ship = forced;
 }
 
 function totals() {
@@ -1104,6 +1203,7 @@ function screenCart() {
 }
 
 function screenCheckout() {
+  syncShippingToCity(); // city may have changed since the last render (see the #city 'change' listener)
   const t = totals();
   if (!t.rows.length) {
     return `
@@ -1185,14 +1285,26 @@ function screenCheckout() {
 
         <section class="checkout-step">
           <h3>روش ارسال</h3>
+          ${
+            !f.city.trim()
+              ? `<div class="ship-hint" style="margin-top:0;margin-bottom:14px">روش ارسال بر اساس شهری که وارد می‌کنید تعیین می‌شود.</div>`
+              : ''
+          }
           <div class="option-stack">
-            ${SHIPPING.map(
-              (s) => `
-              <button class="option" data-act="ship" data-id="${s.id}" role="radio" aria-checked="${state.ship === s.id}">
-                <div><b>${esc(s.label)}</b><span>${esc(s.note)}</span></div>
+            ${SHIPPING.map((s) => {
+              // The forced method (see shippingMethodForCity) is the only one
+              // selectable once a city is entered — everything else is
+              // disabled rather than removed, so it's clear *why* it's not
+              // an option instead of it just vanishing.
+              const forced = shippingMethodForCity(f.city);
+              const eligible = !forced || s.id === forced;
+              const whyNot = s.id === 'peyk' ? 'فقط برای تهران' : 'فقط برای شهرهای غیر از تهران';
+              return `
+              <button class="option" data-act="ship" data-id="${s.id}" role="radio" aria-checked="${state.ship === s.id}" ${eligible ? '' : 'disabled'}>
+                <div><b>${esc(s.label)}</b><span>${esc(eligible ? s.note : s.note + ' — ' + whyNot)}</span></div>
                 <span class="opt-end">${s.payAtDoor ? 'پس‌کرایه' : money(s.cost)}</span>
-              </button>`
-            ).join('')}
+              </button>`;
+            }).join('')}
           </div>
         </section>
 
@@ -1436,7 +1548,7 @@ function screenTrack() {
     <div style="display:flex;gap:12px;align-items:flex-end;margin-top:22px;flex-wrap:wrap">
       <div class="field" style="flex:1;min-width:220px">
         <label for="track">کد سفارش</label>
-        <input class="input ltr" id="track" placeholder="GH-140001" value="${esc(state.trackCode)}">
+        <input class="input ltr" id="track" placeholder="140001" value="${esc(state.trackCode)}">
       </div>
       <div class="field" style="flex:1;min-width:220px">
         <label for="track-phone">شماره موبایل</label>
@@ -1444,6 +1556,7 @@ function screenTrack() {
       </div>
       <button class="btn btn-primary" data-act="track-submit" ${state.trackLoading ? 'disabled' : ''}>${state.trackLoading ? 'در حال بررسی…' : 'پیگیری'}</button>
     </div>
+    <div class="ship-hint">بخش بعد از «GH-» در کد سفارش را وارد کنید — نیازی به تایپ «GH-» نیست (مثلاً برای GH-140001 فقط 140001).</div>
 
     ${state.trackError ? `<div class="alert alert-error" style="margin-top:18px">${esc(state.trackError)}</div>` : ''}
     ${cancelled ? `<div class="alert alert-error" style="margin-top:18px">این سفارش لغو شده است.</div>` : ''}
@@ -1521,6 +1634,7 @@ function syncForm() {
       const el = document.getElementById(k);
       if (el) state.form[k] = el.value;
     });
+    syncShippingToCity();
     const otp = document.getElementById('otp');
     if (otp) state.otp = otp.value;
   }
@@ -1550,11 +1664,24 @@ function placeOrder() {
 
   if (!t.rows.length) return fail('سبد خرید خالی است.');
   if (!f.name.trim()) return fail('نام و نام خانوادگی را وارد کنید.');
-  if (f.phone.replace(/\D/g, '').length < 10) return fail('شماره موبایل را کامل وارد کنید.');
+  if (containsPersianOrArabicDigits(f.phone))
+    return fail('لطفاً شماره موبایل را با اعداد انگلیسی وارد کنید.');
+  if (!isValidIranPhone(f.phone))
+    return fail('شماره موبایل معتبر نیست. مثال: 09121234567 یا +98 912 123 4567');
   if (!f.city.trim()) return fail('شهر را وارد کنید.');
   if (f.address.trim().length < 10) return fail('نشانی را کامل‌تر بنویسید.');
+  // کد پستی stays optional (matches the nullable DB column) — but if the
+  // customer did type one, it has to actually be a valid 10-digit code.
+  if (f.postcode.trim() && !isValidPostcode(f.postcode))
+    return fail('کد پستی باید دقیقاً ۱۰ رقم باشد.');
   if (state.auth === 'otp' && state.otp.trim().length < 4) return fail('کد تأیید را وارد کنید.');
   if (state.placingOrder) return; // already submitting — ignore a double-click
+
+  // Normalize into the canonical stored formats now that both are known
+  // valid — same numbers, one shape, regardless of how the customer typed
+  // them (Persian digits, +98, spaces, ...).
+  f.phone = normalizeIranPhone(f.phone);
+  if (f.postcode.trim()) f.postcode = normalizePostcode(f.postcode);
 
   state.placingOrder = true;
   state.error = '';
@@ -1776,6 +1903,10 @@ const ACTIONS = {
       state.contactError = 'نام را وارد کنید.';
       return render();
     }
+    if (containsPersianOrArabicDigits(state.contact.phone)) {
+      state.contactError = 'لطفاً شماره تماس را با اعداد انگلیسی وارد کنید.';
+      return render();
+    }
     if (state.contact.phone.replace(/\D/g, '').length < 10) {
       state.contactError = 'شماره تماس را کامل وارد کنید.';
       return render();
@@ -1793,12 +1924,17 @@ const ACTIONS = {
 
   'track-submit': () => {
     syncForm();
-    const code = state.trackCode.trim();
+    const code = buildOrderCode(state.trackCode); // customer only types the digits; GH- is reconstructed here
     const phone = state.trackPhone.trim();
 
     state.trackError = '';
     state.trackData = null;
 
+    if (containsPersianOrArabicDigits(phone)) {
+      state.trackError = 'لطفاً شماره موبایل را با اعداد انگلیسی وارد کنید.';
+      render();
+      return;
+    }
     if (!code || phone.replace(/\D/g, '').length < 10) {
       state.trackError = 'کد سفارش و شماره موبایل را کامل وارد کنید.';
       render();
@@ -1860,6 +1996,14 @@ document.addEventListener('change', (e) => {
   }
   if (e.target.id === 'color-picker') {
     state.selectedColorIndex = Number(e.target.value);
+    render();
+  }
+  // شهر determines the only valid shipping method (see shippingMethodForCity)
+  // — 'change' fires on blur, so this reacts as soon as the customer leaves
+  // the field, without re-rendering (and losing their cursor) on every key.
+  if (e.target.id === 'city') {
+    state.form.city = e.target.value;
+    syncShippingToCity();
     render();
   }
 });
