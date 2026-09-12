@@ -428,6 +428,83 @@ async function loadOrders() {
     const sel = document.getElementById(`order-status-${o.id}`);
     if (sel) sel.addEventListener('change', () => updateOrderStatus(o.id, sel.value));
   });
+
+  loadOrdersSummary();
+}
+
+/* ---- Sales summary --------------------------------------------------------
+   The order list above is capped at 100 for display, so it must NOT be the
+   source for these numbers — a "total revenue" that silently only covered
+   the most recent 100 orders would be actively misleading. This fetches its
+   own uncapped(-ish) set instead. 1000 orders is generous headroom for this
+   shop's current volume; revisit if that ever actually gets hit. */
+async function loadOrdersSummary() {
+  const el = document.getElementById('orders-summary');
+  if (!el) return;
+
+  const { data: allOrders, error: ordersErr } = await sb
+    .from('orders')
+    .select('total, status')
+    .limit(1000);
+
+  if (ordersErr || !allOrders) {
+    el.innerHTML = '<p style="color:var(--danger)">خطا در محاسبه‌ی آمار فروش.</p>';
+    return;
+  }
+
+  const counted = allOrders.filter((o) => o.status !== 'cancelled');
+  const revenue = counted.reduce((sum, o) => sum + (o.total || 0), 0);
+  const count = counted.length;
+  const avg = count ? revenue / count : 0;
+
+  // Best-sellers by quantity, excluding cancelled orders — same exclusion
+  // as revenue/count above, for consistency. order_items has no status of
+  // its own, so this joins against orders.status directly (via the
+  // order_items -> orders foreign key) rather than filtering by an .in()
+  // list of order ids, which would mean sending up to 1000 ids in the
+  // query string. Not bounded by the 1000-order cap either way.
+  const { data: allItems } = await sb
+    .from('order_items')
+    .select('name_fa, qty, orders!inner(status)')
+    .neq('orders.status', 'cancelled')
+    .limit(5000);
+
+  const qtyByName = {};
+  (allItems || []).forEach((it) => {
+    qtyByName[it.name_fa] = (qtyByName[it.name_fa] || 0) + (it.qty || 0);
+  });
+  const topProducts = Object.entries(qtyByName)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  el.innerHTML = `
+    <div class="stat-row">
+      <div class="stat-box">
+        <div class="stat-label">درآمد کل</div>
+        <div class="stat-value">${money(revenue)}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">تعداد سفارش</div>
+        <div class="stat-value">${count.toLocaleString('fa-IR')}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">میانگین ارزش سفارش</div>
+        <div class="stat-value">${count ? money(avg) : '—'}</div>
+      </div>
+      <div class="stat-box stat-box-wide">
+        <div class="stat-label">پرفروش‌ترین محصولات</div>
+        ${
+          topProducts.length
+            ? `<ol class="top-products">${topProducts
+                .map(
+                  ([name, qty], i) =>
+                    `<li><span>${i + 1}. ${escapeHtml(name)}</span><span>${qty.toLocaleString('fa-IR')} عدد</span></li>`
+                )
+                .join('')}</ol>`
+            : '<div class="stat-value">—</div>'
+        }
+      </div>
+    </div>`;
 }
 
 function orderCardHtml(o, items) {
@@ -474,7 +551,11 @@ async function updateOrderStatus(id, status) {
   if (error) {
     alert('خطا در تغییر وضعیت: ' + error.message);
     loadOrders();
+    return;
   }
+  // Status feeds directly into the revenue/count exclusion above, so a
+  // change here (into or out of 'cancelled') must refresh the summary too.
+  loadOrdersSummary();
 }
 
 function money(n) {
