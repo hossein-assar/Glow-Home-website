@@ -97,6 +97,95 @@ function buildOrderCode(raw) {
   return v ? 'GH-' + v.toUpperCase() : '';
 }
 
+/* ---- Live digit-group formatting (phone / postcode) ----------------------
+   Purely a display concern: the fields it's wired to (see the 'input'
+   listener near the bottom of the file) always end up storing the plain,
+   space-stripped digits in state — isValidIranPhone/normalizeIranPhone,
+   isValidPostcode/normalizePostcode, and containsPersianOrArabicDigits all
+   keep working exactly as before, unaware any of this exists. */
+
+/** ۰-۹ / ٠-٩ count as digits for grouping purposes same as 0-9, but are
+ * never converted here — containsPersianOrArabicDigits() still needs to
+ * see them exactly as typed at validation time. */
+function isDigitChar(ch) {
+  return /[0-9۰-۹٠-٩]/.test(ch);
+}
+
+/** Groups a digit array into a space-separated string per `groups` sizes
+ * (e.g. [3,3,4] -> "912 345 6789"), and works out where the caret should
+ * land given how many digits logically precede it. Pure — no DOM — so the
+ * same function formats both the live 'input' handler's result and a
+ * plain render()-time display value. */
+function groupDigits(digits, digitsBeforeCaret, groups) {
+  const totalDigits = groups.reduce((a, b) => a + b, 0);
+  const clipped = digits.slice(0, totalDigits);
+  const parts = [];
+  let i = 0;
+  for (const size of groups) {
+    if (i >= clipped.length) break;
+    parts.push(clipped.slice(i, i + size).join(''));
+    i += size;
+  }
+  const formatted = parts.join(' ');
+
+  let caret = formatted.length;
+  if (digitsBeforeCaret <= 0) {
+    caret = 0;
+  } else {
+    let seen = 0;
+    for (let j = 0; j < formatted.length; j++) {
+      if (isDigitChar(formatted[j])) {
+        seen++;
+        if (seen === digitsBeforeCaret) {
+          caret = j + 1;
+          break;
+        }
+      }
+    }
+  }
+  return { formatted, digits: clipped.join(''), caret };
+}
+
+/** For rendering a stored plain-digit value back into a formatted display
+ * string (e.g. state.form.phone -> "912 345 6789" for the input's value
+ * attribute) — same grouping as the live input handler, just without a
+ * caret to place. */
+function formatDigitsForDisplay(raw, groups) {
+  const digits = Array.from(String(raw ?? '')).filter(isDigitChar);
+  return groupDigits(digits, 0, groups).formatted;
+}
+
+/** Applies live digit-grouping to a text input as the customer types —
+ * called from the delegated 'input' listener below, once per keystroke,
+ * on the actual DOM element (never through the app's own render(), which
+ * would replace the whole page and lose focus/cursor position). Regroups
+ * with spaces per `groups`, keeping the cursor where the customer is
+ * actually typing rather than snapping it to the end. Also detects a
+ * backspace/delete that only ate an auto-inserted space (the digit count
+ * didn't actually change) and removes the digit behind/ahead of it too,
+ * so deleting never feels "stuck" on an invisible formatting character.
+ * Returns the plain (space-stripped) digits, for the caller to store. */
+function applyDigitGrouping(el, groups, inputType) {
+  const raw = el.value;
+  const caret = el.selectionStart;
+  let digitsBeforeCaret = Array.from(raw.slice(0, caret)).filter(isDigitChar).length;
+  let digits = Array.from(raw).filter(isDigitChar);
+
+  const prevCount = Number(el.dataset.digitCount || 0);
+  if (inputType === 'deleteContentBackward' && digits.length === prevCount && digitsBeforeCaret > 0) {
+    digits.splice(digitsBeforeCaret - 1, 1);
+    digitsBeforeCaret -= 1;
+  } else if (inputType === 'deleteContentForward' && digits.length === prevCount && digitsBeforeCaret < digits.length) {
+    digits.splice(digitsBeforeCaret, 1);
+  }
+
+  const { formatted, digits: plain, caret: newCaret } = groupDigits(digits, digitsBeforeCaret, groups);
+  el.value = formatted;
+  el.setSelectionRange(newCaret, newCaret);
+  el.dataset.digitCount = String(plain.length);
+  return plain;
+}
+
 /** Escape text before it goes into innerHTML. */
 const esc = (s) =>
   String(s ?? '')
@@ -1294,10 +1383,12 @@ function screenCheckout() {
             </div>
             <div class="field">
               <label for="phone">شماره موبایل</label>
-              <input class="input ltr" id="phone" inputmode="tel" placeholder="912 123 4567" value="${esc(
-                f.phone
-              )}" autocomplete="tel-national">
-              <span class="hint">پیش‌شماره +98 ثابت است — فقط شماره را بدون صفر وارد کنید (مثلاً برای 09121234567 فقط 9121234567).</span>
+              <div class="input-prefixed ltr">
+                <span class="input-prefix-badge">🇮🇷 +98</span>
+                <input class="input-prefixed-field" id="phone" inputmode="tel" placeholder="912 123 4567" value="${esc(
+                  formatDigitsForDisplay(f.phone, [3, 3, 4])
+                )}" autocomplete="tel-national">
+              </div>
               ${state.formErrors.phone ? `<span class="field-error">${esc(state.formErrors.phone)}</span>` : ''}
             </div>
             <div class="field">
@@ -1320,7 +1411,9 @@ function screenCheckout() {
             }
             <div class="field">
               <label for="postcode">کد پستی</label>
-              <input class="input ltr" id="postcode" inputmode="numeric" value="${esc(f.postcode)}" autocomplete="postal-code">
+              <input class="input ltr" id="postcode" inputmode="numeric" value="${esc(
+                formatDigitsForDisplay(f.postcode, [5, 5])
+              )}" autocomplete="postal-code">
               ${state.formErrors.postcode ? `<span class="field-error">${esc(state.formErrors.postcode)}</span>` : ''}
             </div>
             <div class="field span-2">
@@ -1602,15 +1695,22 @@ function screenTrack() {
     <div style="display:flex;gap:12px;align-items:flex-end;margin-top:22px;flex-wrap:wrap">
       <div class="field" style="flex:1;min-width:220px">
         <label for="track">کد سفارش</label>
-        <input class="input ltr" id="track" placeholder="140001" value="${esc(state.trackCode)}">
+        <div class="input-prefixed ltr">
+          <span class="input-prefix-badge">GH-</span>
+          <input class="input-prefixed-field" id="track" placeholder="140001" value="${esc(state.trackCode)}">
+        </div>
       </div>
       <div class="field" style="flex:1;min-width:220px">
         <label for="track-phone">شماره موبایل</label>
-        <input class="input ltr" id="track-phone" placeholder="0912 123 4567" value="${esc(state.trackPhone)}">
+        <div class="input-prefixed ltr">
+          <span class="input-prefix-badge">🇮🇷 +98</span>
+          <input class="input-prefixed-field" id="track-phone" placeholder="912 123 4567" value="${esc(
+            formatDigitsForDisplay(state.trackPhone, [3, 3, 4])
+          )}">
+        </div>
       </div>
       <button class="btn btn-primary" data-act="track-submit" ${state.trackLoading ? 'disabled' : ''}>${state.trackLoading ? 'در حال بررسی…' : 'پیگیری'}</button>
     </div>
-    <div class="ship-hint">بخش بعد از «GH-» در کد سفارش را وارد کنید — نیازی به تایپ «GH-» نیست (مثلاً برای GH-140001 فقط 140001).</div>
 
     ${state.trackError ? `<div class="alert alert-error" style="margin-top:18px">${esc(state.trackError)}</div>` : ''}
     ${cancelled ? `<div class="alert alert-error" style="margin-top:18px">این سفارش لغو شده است.</div>` : ''}
@@ -1684,9 +1784,13 @@ function val(id) {
 /** Pull checkout / contact field values out of the DOM before acting on them. */
 function syncForm() {
   if (state.route === 'checkout') {
+    // phone/postcode show live-formatted spaces (see applyDigitGrouping) —
+    // strip them back out here so state.form always holds the plain digits
+    // that isValidIranPhone/isValidPostcode/normalize* etc. expect.
     ['name', 'phone', 'city', 'address', 'postcode', 'note'].forEach((k) => {
       const el = document.getElementById(k);
-      if (el) state.form[k] = el.value;
+      if (!el) return;
+      state.form[k] = k === 'phone' || k === 'postcode' ? el.value.replace(/\s+/g, '') : el.value;
     });
     const cityChoiceEl = document.getElementById('city-choice');
     if (cityChoiceEl) state.form.cityChoice = cityChoiceEl.value;
@@ -1709,7 +1813,7 @@ function syncForm() {
     const codeEl = document.getElementById('track');
     if (codeEl) state.trackCode = codeEl.value;
     const phoneEl = document.getElementById('track-phone');
-    if (phoneEl) state.trackPhone = phoneEl.value;
+    if (phoneEl) state.trackPhone = phoneEl.value.replace(/\s+/g, '');
   }
 }
 
@@ -2005,13 +2109,24 @@ const ACTIONS = {
     }
     if (state.trackLoading) return; // already checking — ignore a double-click
 
+    // Reconstruct with the fixed "+98" the UI shows, then normalize to the
+    // SAME canonical 09XXXXXXXXX form checkout stores — api/track-order.js
+    // matches by stripping non-digits and comparing directly against the
+    // stored value, with no awareness of +98/country-code prefixes at all,
+    // so sending the "+98" form as-is would never match a real order
+    // (verified: normalizePhone('+989121234567') -> '989121234567', which
+    // is NOT '09121234567', the actual stored value). Sending the
+    // canonical form instead keeps api/track-order.js completely
+    // untouched — it never sees anything but what it's always received.
+    const canonicalPhone = normalizeIranPhone('+98' + phone);
+
     state.trackLoading = true;
     render();
 
     fetch('/api/track-order', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, phone }),
+      body: JSON.stringify({ code, phone: canonicalPhone }),
     })
       .then((r) => r.json())
       .then((res) => {
@@ -2085,10 +2200,32 @@ document.addEventListener('focusout', (e) => {
   if (state.route !== 'checkout') return;
   const id = e.target.id;
   if (!['name', 'phone', 'city', 'address', 'postcode'].includes(id)) return;
-  state.form[id] = e.target.value;
+  // phone/postcode show live-formatted spaces (applyDigitGrouping) — strip
+  // them before storing, same as syncForm().
+  state.form[id] = id === 'phone' || id === 'postcode' ? e.target.value.replace(/\s+/g, '') : e.target.value;
   validateCheckoutField(id);
   if (id === 'city') syncShippingToCity();
   render();
+});
+
+// Live digit-group formatting for the +98-prefixed phone fields and کد
+// پستی — see applyDigitGrouping() for why this runs directly on the DOM
+// element rather than through render(). No live 'q'-style focus/cursor
+// restoration is needed here since applyDigitGrouping() sets the cursor
+// itself and never calls render().
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'phone') {
+    state.form.phone = applyDigitGrouping(e.target, [3, 3, 4], e.inputType);
+    return;
+  }
+  if (e.target.id === 'track-phone') {
+    state.trackPhone = applyDigitGrouping(e.target, [3, 3, 4], e.inputType);
+    return;
+  }
+  if (e.target.id === 'postcode') {
+    state.form.postcode = applyDigitGrouping(e.target, [5, 5], e.inputType);
+    return;
+  }
 });
 
 // Live search from the header, on every screen.
