@@ -1128,6 +1128,19 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
 .track-step b { font-size: 15px; }
 .track-step span { display: block; font-size: 13.5px; color: var(--color-neutral-600); }
 
+/* Once a real order is looked up, dim steps the order hasn't reached yet
+   and highlight the ones it has (see TRACK_STEP in app.js). */
+.track-steps.has-status .track-step { opacity: 0.4; }
+.track-steps.has-status .track-step.is-active {
+  opacity: 1;
+  border-color: var(--color-accent-600);
+  background: var(--color-accent-100);
+}
+.track-items { margin-top: 22px; }
+.track-items ul { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; }
+.track-items li { display: flex; justify-content: space-between; font-size: 14px; }
+.track-items .track-total { margin-top: 10px; font-weight: 600; display: flex; justify-content: space-between; }
+
 /* ---- Footer ------------------------------------------------------------- */
 
 .footer {

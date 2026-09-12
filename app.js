@@ -162,7 +162,10 @@ const state = {
   order: null,
   faqOpen: 0,
   trackCode: '',
-  trackResult: '',
+  trackPhone: '',
+  trackLoading: false, // true while /api/track-order is in flight
+  trackError: '',
+  trackData: null, // { code, status, items, total, createdAt } from a matched lookup
   contact: { name: '', phone: '', msg: '' },
   contactSent: false,
   contactError: '',
@@ -1414,27 +1417,51 @@ function screenContact() {
   </div>`;
 }
 
+// Which status values light up which step of the three-step tracker.
+// pending/paid -> step 1, preparing -> step 2, shipped/delivered -> step 3.
+// 'cancelled' (and anything unrecognized) maps to 0 — no step highlighted.
+const TRACK_STEP = { pending: 1, paid: 1, preparing: 2, shipped: 3, delivered: 3 };
+
 function screenTrack() {
+  const d = state.trackData;
+  const step = d ? TRACK_STEP[d.status] || 0 : 0;
+  const cancelled = d && d.status === 'cancelled';
+
   return `
   <div class="shell-narrow screen">
     <img class="page-motif" src="images/motif-flower.png" alt="">
     <h1 class="page-title">پیگیری سفارش</h1>
-    <p class="lead" style="margin-top:12px">کد سفارش خود را وارد کنید. کد در صفحه‌ی تأیید سفارش نشان داده شده است.</p>
+    <p class="lead" style="margin-top:12px">کد سفارش و شماره موبایلی که هنگام ثبت سفارش وارد کرده‌اید را وارد کنید.</p>
 
     <div style="display:flex;gap:12px;align-items:flex-end;margin-top:22px;flex-wrap:wrap">
       <div class="field" style="flex:1;min-width:220px">
         <label for="track">کد سفارش</label>
         <input class="input ltr" id="track" placeholder="GH-140001" value="${esc(state.trackCode)}">
       </div>
-      <button class="btn btn-primary" data-act="track">پیگیری</button>
+      <div class="field" style="flex:1;min-width:220px">
+        <label for="track-phone">شماره موبایل</label>
+        <input class="input ltr" id="track-phone" placeholder="0912 123 4567" value="${esc(state.trackPhone)}">
+      </div>
+      <button class="btn btn-primary" data-act="track-submit" ${state.trackLoading ? 'disabled' : ''}>${state.trackLoading ? 'در حال بررسی…' : 'پیگیری'}</button>
     </div>
 
-    ${state.trackResult ? `<div class="alert alert-info" style="margin-top:18px">${esc(state.trackResult)}</div>` : ''}
+    ${state.trackError ? `<div class="alert alert-error" style="margin-top:18px">${esc(state.trackError)}</div>` : ''}
+    ${cancelled ? `<div class="alert alert-error" style="margin-top:18px">این سفارش لغو شده است.</div>` : ''}
 
-    <div class="track-steps">
-      <div class="track-step">${icon('check')}<div><b>ثبت سفارش</b><span>سفارش دریافت شد</span></div></div>
-      <div class="track-step">${icon('package')}<div><b>آماده‌سازی</b><span>بسته‌بندی در استودیو، یک تا دو روز کاری</span></div></div>
-      <div class="track-step">${icon('truck')}<div><b>ارسال</b><span>کد رهگیری پس از تحویل به پست پیامک می‌شود</span></div></div>
+    ${d && !cancelled ? `
+      <div class="track-items">
+        <b>${esc(d.code)}</b>
+        <ul>
+          ${d.items.map((it) => `<li><span>${esc(it.name_fa)}</span><span>${FA(it.qty)} عدد</span></li>`).join('')}
+        </ul>
+        <div class="track-total"><span>جمع کل</span><span>${money(d.total)}</span></div>
+      </div>
+    ` : ''}
+
+    <div class="track-steps ${d ? 'has-status' : ''}">
+      <div class="track-step ${step >= 1 ? 'is-active' : ''}">${icon('check')}<div><b>ثبت سفارش</b><span>سفارش دریافت شد</span></div></div>
+      <div class="track-step ${step >= 2 ? 'is-active' : ''}">${icon('package')}<div><b>آماده‌سازی</b><span>بسته‌بندی در استودیو، یک تا دو روز کاری</span></div></div>
+      <div class="track-step ${step >= 3 ? 'is-active' : ''}">${icon('truck')}<div><b>ارسال</b><span>کد رهگیری پس از تحویل به پست پیامک می‌شود</span></div></div>
     </div>
   </div>`;
 }
@@ -1509,8 +1536,10 @@ function syncForm() {
     if (el) state.code = el.value;
   }
   if (state.route === 'track') {
-    const el = document.getElementById('track');
-    if (el) state.trackCode = el.value;
+    const codeEl = document.getElementById('track');
+    if (codeEl) state.trackCode = codeEl.value;
+    const phoneEl = document.getElementById('track-phone');
+    if (phoneEl) state.trackPhone = phoneEl.value;
   }
 }
 
@@ -1762,14 +1791,44 @@ const ACTIONS = {
     render();
   },
 
-  track: () => {
+  'track-submit': () => {
     syncForm();
-    const c = state.trackCode.trim();
-    state.trackResult =
-      c.length < 4
-        ? 'کد سفارش را کامل وارد کنید.'
-        : 'سفارش ' + c + ' در حال آماده‌سازی است. کد رهگیری پس از تحویل به پست پیامک می‌شود.';
+    const code = state.trackCode.trim();
+    const phone = state.trackPhone.trim();
+
+    state.trackError = '';
+    state.trackData = null;
+
+    if (!code || phone.replace(/\D/g, '').length < 10) {
+      state.trackError = 'کد سفارش و شماره موبایل را کامل وارد کنید.';
+      render();
+      return;
+    }
+    if (state.trackLoading) return; // already checking — ignore a double-click
+
+    state.trackLoading = true;
     render();
+
+    fetch('/api/track-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, phone }),
+    })
+      .then((r) => r.json())
+      .then((res) => {
+        state.trackLoading = false;
+        if (!res.ok) {
+          state.trackError = res.error || 'کد سفارش یا شماره موبایل مطابقت ندارد.';
+        } else {
+          state.trackData = res;
+        }
+        render();
+      })
+      .catch(() => {
+        state.trackLoading = false;
+        state.trackError = 'اتصال برقرار نشد. اینترنت خود را بررسی کنید و دوباره تلاش کنید.';
+        render();
+      });
   },
 };
 
@@ -1830,7 +1889,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key !== 'Enter') return;
   if (e.target.id === 'code') ACTIONS['apply-code']();
-  if (e.target.id === 'track') ACTIONS.track();
+  if (e.target.id === 'track' || e.target.id === 'track-phone') ACTIONS['track-submit']();
 });
 
 window.addEventListener('hashchange', onRouteChange);
