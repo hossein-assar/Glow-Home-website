@@ -27,11 +27,21 @@ decisions from code alone — read this before making structural changes.
   normalization, same reasoning as the pricing re-fetch above). کد پستی:
   exactly 10 digits; Persian/Arabic-Indic numerals (۰-۹ / ٠-٩) are silently
   converted to Latin before validating and storing
-  (`isValidPostcode`/`normalizePostcode`). شماره موبایل: real Iranian
-  mobile format — accepts `+98`/`0098`/`98`/`0` prefixes, requires a
-  9-prefixed 10-digit subscriber number, normalized to the canonical stored
-  form `09XXXXXXXXX` (`isValidIranPhone`/`normalizeIranPhone`). Unlike
-  postcode, phone numbers do **not** get Persian/Arabic digits silently
+  (`isValidPostcode`/`normalizePostcode`). شماره موبایل: the checkout
+  field shows a fixed "+98" prefix in the UI — the customer only ever
+  types the bare 10-digit subscriber number, which gets reconstructed to
+  `+98XXXXXXXXXX` before validating/sending
+  (`isValidIranPhone`/`iranPhoneSubscriberPart`, simplified accordingly —
+  no longer needs to guess between the old `+98`/`0098`/`98`/`0`-prefixed
+  or bare shapes). The canonical **stored** format is unchanged,
+  `09XXXXXXXXX` (`normalizeIranPhone`), specifically so existing orders,
+  the admin panel, and `/track` matching all keep working with no changes
+  on their end. One consequence: `api/orders.js`'s public validation
+  surface narrowed along with it — it no longer accepts the old
+  `0098…`/bare-`98…`/leading-`0` phone shapes directly. That only matters
+  to something calling `/api/orders` outside the browser (curl/devtools);
+  the real checkout flow only ever sends the new `+98` form, so no actual
+  customer is affected. Unlike postcode, phone numbers do **not** get Persian/Arabic digits silently
   converted: `containsPersianOrArabicDigits()` rejects them up front with a
   message asking for English digits instead, because the phone input
   doubles as the canonical stored value — see the gotcha below, this
@@ -40,18 +50,39 @@ decisions from code alone — read this before making structural changes.
   `/track` keep their own looser length-based format check beyond the
   digit-rejection (contact may legitimately be a landline; `/track` only
   needs to match an already-valid stored phone).
+- **Checkout errors are inline, per-field, and live**: نام, شماره موبایل,
+  شهر, نشانی and کد پستی each show their own error message directly under
+  that field (`.field-error`, a true red — `--color-red-700` — chosen
+  deliberately distinct from the site's existing warm `--color-accent-800`
+  "error" tone that `.alert-error` uses elsewhere), not one shared box.
+  Validated live on blur (`focusout`, not `change` — `change` alone misses
+  a field left empty and never edited) via `FIELD_VALIDATORS` in `app.js`,
+  and re-checked in full on submit so nothing skips validation just by
+  never being blurred. The shared `state.error`/`.alert-error` box still
+  exists for everything that isn't a single field's problem — empty cart,
+  missing OTP, network/server failures.
 - **Shipping method**: determined entirely by شهر, not chosen freely by the
   customer — تهران gets پیک تهران only, anywhere else (non-empty) gets
   تیپاکس only (`shippingMethodForCity()` in `app.js`, mirrored in
   `api/orders.js`; `normalizePersianText()` handles whitespace/half-space
-  and Arabic-vs-Persian ی/ک variants so close spellings still match). Only
-  these two methods exist — پست پیشتاز was retired from both `data.js`'s
-  and `api/orders.js`'s `SHIPPING` once this rule made it permanently
-  unreachable (no city could ever select it). The checkout UI disables
-  (doesn't hide) the ineligible option with a reason, and reacts live to
-  شهر edits. `api/orders.js` derives the shipping method solely from the
-  validated city — it never trusts the client's own `shipping_method`
-  choice, same "don't trust the client" pattern as pricing/stock.
+  and Arabic-vs-Persian ی/ک variants so close spellings still match). شهر
+  itself is a تهران / شهرستان dropdown, not free text — picking شهرستان
+  reveals a free-text city-name field, and that typed value is what
+  actually feeds `shippingMethodForCity()`. Only these two methods exist —
+  پست پیشتاز was retired from both `data.js`'s and `api/orders.js`'s
+  `SHIPPING` once this rule made it permanently unreachable (no city could
+  ever select it). The checkout UI disables (doesn't hide) the ineligible
+  option with a reason, and reacts live to شهر edits. `api/orders.js`
+  derives the shipping method solely from the validated city — it never
+  trusts the client's own `shipping_method` choice, same "don't trust the
+  client" pattern as pricing/stock. پیک تهران additionally never qualifies
+  for the `FREE_SHIP_OVER` free-shipping discount, even above the
+  threshold — its `SHIPPING` entry carries a `neverFree` flag (`data.js` +
+  `api/orders.js`) checked identically in both `totals()` (`app.js`) and
+  the equivalent block in `api/orders.js`, so the UI-displayed total and
+  the actually-charged total can never diverge on this. تیپاکس needs no
+  such flag — its existing `payAtDoor` handling already excludes it from
+  ever being "free" on its own.
 - **Order notifications**: `/api/orders.js` emails the shop on every new
   order via Resend's API (plain `fetch()`, no SDK). Needs `RESEND_API_KEY`
   and `ORDER_NOTIFY_EMAIL` set in Vercel's environment variables — never in
@@ -138,6 +169,16 @@ update both sides.
   value (`09XXXXXXXXX`), so a silent conversion there is one more place a
   subtle bug could creep into what actually gets saved, whereas postcode's
   conversion is low-risk since it's just digits either way.
+- **Phone autofill vs. the fixed +98 field**: some browsers autofill an
+  Iranian phone number in the old national format (leading `0`,
+  `09121234567`) — since the checkout phone field now only accepts the
+  bare 10-digit subscriber number (no leading `0`), an autofilled value
+  can show as invalid until the customer deletes the leading `0` by hand.
+  `autocomplete="tel-national"` is set as a partial mitigation (asks the
+  browser to fill just the national significant number), but this isn't
+  guaranteed across all browsers/autofill sources. Worth revisiting if
+  real complaints come in — not something to "fix" reactively without
+  first checking whether it's actually causing trouble.
 
 ## Not yet built
 
