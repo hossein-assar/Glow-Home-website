@@ -21,12 +21,56 @@ decisions from code alone — read this before making structural changes.
   sends *which* products and *how many* — the function re-fetches real
   prices/stock from the DB itself, so nobody can tamper with pricing from
   devtools. Never let the browser write directly to `orders`/`order_items`.
+- **Checkout field validation**: کد پستی and شماره موبایل are both
+  validated and normalized on *both* sides — `app.js` client-side, mirrored
+  by hand in `api/orders.js` server-side (never trusts the client's own
+  normalization, same reasoning as the pricing re-fetch above). کد پستی:
+  exactly 10 digits; Persian/Arabic-Indic numerals (۰-۹ / ٠-٩) are silently
+  converted to Latin before validating and storing
+  (`isValidPostcode`/`normalizePostcode`). شماره موبایل: real Iranian
+  mobile format — accepts `+98`/`0098`/`98`/`0` prefixes, requires a
+  9-prefixed 10-digit subscriber number, normalized to the canonical stored
+  form `09XXXXXXXXX` (`isValidIranPhone`/`normalizeIranPhone`). Unlike
+  postcode, phone numbers do **not** get Persian/Arabic digits silently
+  converted: `containsPersianOrArabicDigits()` rejects them up front with a
+  message asking for English digits instead, because the phone input
+  doubles as the canonical stored value — see the gotcha below, this
+  inconsistency with postcode is deliberate. Applied consistently across
+  checkout, the contact form, and `/track`, though the contact form and
+  `/track` keep their own looser length-based format check beyond the
+  digit-rejection (contact may legitimately be a landline; `/track` only
+  needs to match an already-valid stored phone).
+- **Shipping method**: determined entirely by شهر, not chosen freely by the
+  customer — تهران gets پیک تهران only, anywhere else (non-empty) gets
+  تیپاکس only (`shippingMethodForCity()` in `app.js`, mirrored in
+  `api/orders.js`; `normalizePersianText()` handles whitespace/half-space
+  and Arabic-vs-Persian ی/ک variants so close spellings still match). Only
+  these two methods exist — پست پیشتاز was retired from both `data.js`'s
+  and `api/orders.js`'s `SHIPPING` once this rule made it permanently
+  unreachable (no city could ever select it). The checkout UI disables
+  (doesn't hide) the ineligible option with a reason, and reacts live to
+  شهر edits. `api/orders.js` derives the shipping method solely from the
+  validated city — it never trusts the client's own `shipping_method`
+  choice, same "don't trust the client" pattern as pricing/stock.
 - **Order notifications**: `/api/orders.js` emails the shop on every new
   order via Resend's API (plain `fetch()`, no SDK). Needs `RESEND_API_KEY`
   and `ORDER_NOTIFY_EMAIL` set in Vercel's environment variables — never in
   code. If either is missing, the notification step silently no-ops rather
   than breaking checkout; a failed send (bad key, Resend outage, etc.) is
   caught and logged with `console.error` but never surfaces to the customer.
+- **Order tracking**: `/track` + `/api/track-order.js`. Requires BOTH the
+  order code and the phone used at checkout to match — order codes are
+  sequential and easily guessable, so code alone must never be enough;
+  a mismatch on either one returns the identical generic error so it can't
+  be used to probe which half was wrong. Returns order contents + status
+  only, never the customer's name/phone/address. The code field only asks
+  the customer for the part after "GH-" — `buildOrderCode()` in `app.js`
+  reconstructs the full canonical form client-side (case-insensitive,
+  handles a pasted "GH-"/"gh-" prefix, even doubled-up, gracefully).
+  Letters are deliberately still accepted there, not just digits: rare as
+  it is, `api/orders.js` has a base-36 fallback order-code path (letters
+  included) for when its DB sequence RPC fails, and a customer with one of
+  those still needs to be able to look it up.
 - **Admin panel**: `/admin/` — plain Supabase-auth login, `is_admin` flag on
   `profiles`. Can edit every product field (price, stock, subcategory, style,
   variants, colors) and view/update order status. This is the only place
@@ -84,6 +128,16 @@ update both sides.
   (`images/banner-lamps.jpg`) through the same mechanism. If you get a real
   wide "lineup" photo for another category, wire it the same way via
   `COLLECTIONS.<key>.bannerImg` in data.js.
+- **Persian/Arabic-digit handling is inconsistent on purpose**: کد پستی
+  silently converts Persian/Arabic-Indic numerals (۰-۹ / ٠-٩) to Latin
+  before validating (`toLatinDigits()`); شماره موبایل fields do the
+  opposite on purpose — `containsPersianOrArabicDigits()` rejects them with
+  a message asking for English digits, rather than converting. Don't
+  "clean this up" into one consistent behavior later without realizing it
+  was a deliberate choice: phone input doubles as the canonical stored
+  value (`09XXXXXXXXX`), so a silent conversion there is one more place a
+  subtle bug could creep into what actually gets saved, whereas postcode's
+  conversion is low-risk since it's just digits either way.
 
 ## Not yet built
 
@@ -93,5 +147,3 @@ update both sides.
   as of this writing.
 - **Customer accounts** — guest checkout only, no login, no order history
   for customers.
-- **Order tracking page** — a "پیگیری سفارش" link exists in the footer nav;
-  whether it actually looks up a real order by code was never verified.
