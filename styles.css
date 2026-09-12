@@ -86,6 +86,12 @@
   --color-sage-500: #679084;
   --color-sage-700: #4a6a60;
 
+  /* True red — used only for inline field-validation text (.field-error),
+     which needs to read as an unambiguous "wrong" signal distinct from the
+     warm accent tone .alert-error uses elsewhere. Picked warm/muted rather
+     than a pure #ff0000 so it doesn't clash with the rest of the palette. */
+  --color-red-700: #c0392b;
+
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -1004,6 +1010,11 @@ button.media.gallery-cover {
 .field { display: flex; flex-direction: column; gap: 7px; }
 .field label { font-size: 14px; font-weight: 500; }
 .field .hint { font-size: 12.5px; color: var(--color-neutral-600); }
+/* Deliberately red, not the muted --color-accent-800 tone .alert-error
+   uses elsewhere — inline per-field validation needs to read at a glance
+   as "this is wrong," which the site's warm/brown "error" tone doesn't
+   signal clearly enough on its own next to a plain label. */
+.field-error { display: block; font-size: 12.5px; color: var(--color-red-700); }
 
 .input, textarea.input, select.input {
   width: 100%;

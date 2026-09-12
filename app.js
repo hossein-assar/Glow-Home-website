@@ -41,19 +41,20 @@ function containsPersianOrArabicDigits(raw) {
   return /[۰-۹٠-٩]/.test(String(raw ?? ''));
 }
 
-/** Strip an Iranian mobile number down to its bare 10-digit subscriber part
- * (starts with 9), accepting +98/0098/98/0 trunk-or-country prefixes and
- * ignoring spaces — or null if what's left doesn't look like one. Handles
- * "+98 912 345 6789", "0912 345 6789", "989123456789", "09123456789", ...
- * Expects English digits only — callers must reject Persian/Arabic-Indic
- * digits themselves first (containsPersianOrArabicDigits) rather than have
- * this silently convert them the way postcode's helpers do. */
+/** The checkout phone field shows a fixed "+98" prefix in the UI (the
+ * customer only ever types the bare 10-digit subscriber part after it —
+ * same "fixed prefix, customer only types the rest" pattern as /track's
+ * order-code field, see buildOrderCode()), so this no longer needs to
+ * guess between +98/0098/98/0-prefixed or bare input the way it used to.
+ * It still tolerates an optional "+98" so it works equally whether it's
+ * called on the bare digits or on the reconstructed "+98"+digits form
+ * (placeOrder() sends the latter). Expects English digits only — callers
+ * must reject Persian/Arabic-Indic digits themselves first
+ * (containsPersianOrArabicDigits) rather than have this silently convert
+ * them the way postcode's helpers do. */
 function iranPhoneSubscriberPart(raw) {
   let v = String(raw ?? '').replace(/\s+/g, '');
   if (v.startsWith('+98')) v = v.slice(3);
-  else if (v.startsWith('0098')) v = v.slice(4);
-  else if (v.startsWith('98') && v.length === 12) v = v.slice(2);
-  else if (v.startsWith('0')) v = v.slice(1);
   return /^9[0-9]{9}$/.test(v) ? v : null;
 }
 
@@ -61,7 +62,8 @@ function isValidIranPhone(raw) {
   return iranPhoneSubscriberPart(raw) !== null;
 }
 
-/** Canonical stored format: 09XXXXXXXXX. Call only after isValidIranPhone() passes. */
+/** Canonical stored format: 09XXXXXXXXX — same fixed prefix, just stored
+ * as a leading 0 instead of "+98". Call only after isValidIranPhone() passes. */
 function normalizeIranPhone(raw) {
   const sub = iranPhoneSubscriberPart(raw);
   return sub ? '0' + sub : String(raw ?? '').trim();
@@ -238,7 +240,11 @@ const state = {
   auth: 'guest',
   otpSent: false,
   otp: '',
-  form: { name: '', phone: '', city: '', address: '', postcode: '', note: '' },
+  form: { name: '', phone: '', city: '', cityChoice: '', address: '', postcode: '', note: '' },
+  // Per-field checkout errors (point 4) — kept separate from `error` below,
+  // which stays for failures with no single field to attach to (empty
+  // cart, OTP, network/server errors).
+  formErrors: { name: '', phone: '', city: '', address: '', postcode: '' },
   error: '',
   order: null,
   faqOpen: 0,
@@ -332,6 +338,35 @@ function syncShippingToCity() {
   if (forced) state.ship = forced;
 }
 
+/** One pure check per checkout field, all keyed the same as state.form /
+ * state.formErrors — reused by the live per-field (blur) validation and by
+ * placeOrder()'s full re-check on submit, so the two can never drift into
+ * different rules. Returns '' when the field is valid. */
+const FIELD_VALIDATORS = {
+  name: (f) => (f.name.trim() ? '' : 'نام و نام خانوادگی را وارد کنید.'),
+  phone: (f) => {
+    if (containsPersianOrArabicDigits(f.phone)) return 'لطفاً شماره موبایل را با اعداد انگلیسی وارد کنید.';
+    return isValidIranPhone(f.phone) ? '' : 'شماره موبایل معتبر نیست. مثال: 9121234567';
+  },
+  city: (f) => {
+    if (!f.cityChoice) return 'شهر را انتخاب کنید.';
+    if (f.cityChoice === 'other' && !f.city.trim()) return 'نام شهر را وارد کنید.';
+    return '';
+  },
+  address: (f) => (f.address.trim().length >= 10 ? '' : 'نشانی را کامل‌تر بنویسید.'),
+  postcode: (f) => {
+    if (!f.postcode.trim()) return ''; // optional — nullable column, matches placeOrder()'s existing rule
+    return isValidPostcode(f.postcode) ? '' : 'کد پستی باید دقیقاً ۱۰ رقم باشد.';
+  },
+};
+
+/** Runs one field's validator against the live state.form and updates its
+ * state.formErrors slot in place. Call after render() so the message shows. */
+function validateCheckoutField(key) {
+  const fn = FIELD_VALIDATORS[key];
+  if (fn) state.formErrors[key] = fn(state.form);
+}
+
 function totals() {
   const rows = Object.keys(state.cart)
     .map((key) => {
@@ -348,7 +383,7 @@ function totals() {
   const base = subtotal - discount;
 
   const method = SHIPPING.find((s) => s.id === state.ship) || SHIPPING[0];
-  const freeShip = !method.payAtDoor && base >= FREE_SHIP_OVER;
+  const freeShip = !method.payAtDoor && !method.neverFree && base >= FREE_SHIP_OVER;
   const shipCost = method.payAtDoor || freeShip ? 0 : method.cost;
 
   // Tipax is collect-on-delivery: it is never "free", the customer pays the
@@ -1255,24 +1290,43 @@ function screenCheckout() {
             <div class="field">
               <label for="name">نام و نام خانوادگی</label>
               <input class="input" id="name" value="${esc(f.name)}" autocomplete="name">
+              ${state.formErrors.name ? `<span class="field-error">${esc(state.formErrors.name)}</span>` : ''}
             </div>
             <div class="field">
               <label for="phone">شماره موبایل</label>
-              <input class="input ltr" id="phone" inputmode="tel" placeholder="09xxxxxxxxx" value="${esc(
+              <input class="input ltr" id="phone" inputmode="tel" placeholder="912 123 4567" value="${esc(
                 f.phone
-              )}" autocomplete="tel">
+              )}" autocomplete="tel-national">
+              <span class="hint">پیش‌شماره +98 ثابت است — فقط شماره را بدون صفر وارد کنید (مثلاً برای 09121234567 فقط 9121234567).</span>
+              ${state.formErrors.phone ? `<span class="field-error">${esc(state.formErrors.phone)}</span>` : ''}
             </div>
             <div class="field">
-              <label for="city">شهر</label>
-              <input class="input" id="city" value="${esc(f.city)}" autocomplete="address-level2">
+              <label for="city-choice">شهر</label>
+              <select class="input" id="city-choice">
+                <option value="" ${!f.cityChoice ? 'selected' : ''} disabled>شهر خود را انتخاب کنید</option>
+                <option value="tehran" ${f.cityChoice === 'tehran' ? 'selected' : ''}>تهران</option>
+                <option value="other" ${f.cityChoice === 'other' ? 'selected' : ''}>شهرستان</option>
+              </select>
+              ${state.formErrors.city && f.cityChoice !== 'other' ? `<span class="field-error">${esc(state.formErrors.city)}</span>` : ''}
             </div>
+            ${
+              f.cityChoice === 'other'
+                ? `<div class="field">
+                     <label for="city">نام شهر</label>
+                     <input class="input" id="city" value="${esc(f.city)}" autocomplete="address-level2">
+                     ${state.formErrors.city ? `<span class="field-error">${esc(state.formErrors.city)}</span>` : ''}
+                   </div>`
+                : ''
+            }
             <div class="field">
               <label for="postcode">کد پستی</label>
               <input class="input ltr" id="postcode" inputmode="numeric" value="${esc(f.postcode)}" autocomplete="postal-code">
+              ${state.formErrors.postcode ? `<span class="field-error">${esc(state.formErrors.postcode)}</span>` : ''}
             </div>
             <div class="field span-2">
               <label for="address">نشانی کامل</label>
               <textarea class="input" id="address" autocomplete="street-address">${esc(f.address)}</textarea>
+              ${state.formErrors.address ? `<span class="field-error">${esc(state.formErrors.address)}</span>` : ''}
             </div>
             <div class="field span-2">
               <label for="note">یادداشت سفارش</label>
@@ -1287,7 +1341,7 @@ function screenCheckout() {
           <h3>روش ارسال</h3>
           ${
             !f.city.trim()
-              ? `<div class="ship-hint" style="margin-top:0;margin-bottom:14px">روش ارسال بر اساس شهری که وارد می‌کنید تعیین می‌شود.</div>`
+              ? `<div class="ship-hint" style="margin-top:0;margin-bottom:14px">روش ارسال بر اساس شهری که انتخاب می‌کنید تعیین می‌شود.</div>`
               : ''
           }
           <div class="option-stack">
@@ -1634,6 +1688,8 @@ function syncForm() {
       const el = document.getElementById(k);
       if (el) state.form[k] = el.value;
     });
+    const cityChoiceEl = document.getElementById('city-choice');
+    if (cityChoiceEl) state.form.cityChoice = cityChoiceEl.value;
     syncShippingToCity();
     const otp = document.getElementById('otp');
     if (otp) state.otp = otp.value;
@@ -1663,24 +1719,29 @@ function placeOrder() {
   const f = state.form;
 
   if (!t.rows.length) return fail('سبد خرید خالی است.');
-  if (!f.name.trim()) return fail('نام و نام خانوادگی را وارد کنید.');
-  if (containsPersianOrArabicDigits(f.phone))
-    return fail('لطفاً شماره موبایل را با اعداد انگلیسی وارد کنید.');
-  if (!isValidIranPhone(f.phone))
-    return fail('شماره موبایل معتبر نیست. مثال: 09121234567 یا +98 912 123 4567');
-  if (!f.city.trim()) return fail('شهر را وارد کنید.');
-  if (f.address.trim().length < 10) return fail('نشانی را کامل‌تر بنویسید.');
-  // کد پستی stays optional (matches the nullable DB column) — but if the
-  // customer did type one, it has to actually be a valid 10-digit code.
-  if (f.postcode.trim() && !isValidPostcode(f.postcode))
-    return fail('کد پستی باید دقیقاً ۱۰ رقم باشد.');
-  if (state.auth === 'otp' && state.otp.trim().length < 4) return fail('کد تأیید را وارد کنید.');
+
+  // Point 4: re-check every field at once on submit (not stop-at-the-first
+  // failure) so a field never left/blurred still gets caught, and every
+  // problem shows inline at the same time rather than one at a time.
+  Object.keys(FIELD_VALIDATORS).forEach(validateCheckoutField);
+  const hasFieldError = Object.values(state.formErrors).some(Boolean);
+
+  state.error = state.auth === 'otp' && state.otp.trim().length < 4 ? 'کد تأیید را وارد کنید.' : '';
+
+  if (hasFieldError || state.error) {
+    render();
+    if (state.error) $('.alert-error')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return;
+  }
+
   if (state.placingOrder) return; // already submitting — ignore a double-click
 
-  // Normalize into the canonical stored formats now that both are known
-  // valid — same numbers, one shape, regardless of how the customer typed
-  // them (Persian digits, +98, spaces, ...).
-  f.phone = normalizeIranPhone(f.phone);
+  // Reconstruct the full number from the fixed "+98" the UI shows plus the
+  // bare digits the customer typed — same "fixed prefix, customer only
+  // types the rest" pattern as buildOrderCode() for /track's order code.
+  // f.phone itself is left as the bare digits (that's what the input keeps
+  // showing); fullPhone is only used for what actually gets sent.
+  const fullPhone = '+98' + f.phone.trim();
   if (f.postcode.trim()) f.postcode = normalizePostcode(f.postcode);
 
   state.placingOrder = true;
@@ -1691,7 +1752,7 @@ function placeOrder() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      customer: { name: f.name, phone: f.phone, city: f.city, address: f.address, postcode: f.postcode },
+      customer: { name: f.name, phone: fullPhone, city: f.city, address: f.address, postcode: f.postcode },
       note: f.note,
       items: t.rows.map((r) => ({ cartKey: r.cartKey, qty: r.qty })),
       shipping_method: state.ship,
@@ -1711,7 +1772,9 @@ function placeOrder() {
         shipLabel: res.shipLabel === 'رایگان' || res.shipLabel === 'پس‌کرایه' ? res.shipLabel : money(Number(res.shipLabel)),
         payLabel: (PAYMENTS.find((p) => p.id === state.pay) || PAYMENTS[0]).label,
         name: f.name,
-        phone: f.phone,
+        // Canonical 09XXXXXXXXX, not the +98 form actually sent — this is
+        // what's really stored, and what a later /track lookup needs typed.
+        phone: normalizeIranPhone(fullPhone),
       };
 
       state.cart = {};
@@ -1999,13 +2062,33 @@ document.addEventListener('change', (e) => {
     render();
   }
   // شهر determines the only valid shipping method (see shippingMethodForCity)
-  // — 'change' fires on blur, so this reacts as soon as the customer leaves
-  // the field, without re-rendering (and losing their cursor) on every key.
-  if (e.target.id === 'city') {
-    state.form.city = e.target.value;
+  // — a <select> fires 'change' the instant a new option is picked, so this
+  // reacts immediately. Picking "تهران" needs no further input; picking
+  // "شهرستان" reveals the #city text field, handled by the focusout
+  // listener below once the customer actually types a city and leaves it.
+  if (e.target.id === 'city-choice') {
+    state.form.cityChoice = e.target.value;
+    state.form.city = state.form.cityChoice === 'tehran' ? 'تهران' : '';
     syncShippingToCity();
+    validateCheckoutField('city');
     render();
   }
+});
+
+// Live, per-field checkout validation (point 4): runs each field's check
+// the moment the customer leaves it, same "react on leaving the field, not
+// on every keystroke" idea already used for شهر above. 'focusout' (unlike
+// 'change') fires on every blur regardless of whether the value actually
+// changed, so tabbing past a field left empty still surfaces its error —
+// 'change' alone would silently miss that case.
+document.addEventListener('focusout', (e) => {
+  if (state.route !== 'checkout') return;
+  const id = e.target.id;
+  if (!['name', 'phone', 'city', 'address', 'postcode'].includes(id)) return;
+  state.form[id] = e.target.value;
+  validateCheckoutField(id);
+  if (id === 'city') syncShippingToCity();
+  render();
 });
 
 // Live search from the header, on every screen.

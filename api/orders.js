@@ -22,8 +22,12 @@ const SUPABASE_URL = 'https://sgfoesnpodvwyzlxfhtq.supabase.co';
 // Only two methods exist: which one applies is decided entirely by شهر (see
 // shippingMethodForCity below) — پست پیشتاز was retired because the
 // Tehran/non-Tehran rule left no city that could ever reach it.
+//
+// neverFree: پیک تهران always costs its full price, even above
+// FREE_SHIP_OVER — تیپاکس needs no such flag since payAtDoor already
+// keeps it out of the free-shipping calculation on its own (see below).
 const SHIPPING = {
-  peyk: { label: 'پیک تهران', cost: 90000, payAtDoor: false },
+  peyk: { label: 'پیک تهران', cost: 90000, payAtDoor: false, neverFree: true },
   tipax: { label: 'تیپاکس', cost: 0, payAtDoor: true },
 };
 const FREE_SHIP_OVER = 3000000;
@@ -59,12 +63,15 @@ function containsPersianOrArabicDigits(raw) {
   return /[۰-۹٠-٩]/.test(String(raw ?? ''));
 }
 
+// The checkout phone field shows a fixed "+98" prefix in the UI now (the
+// customer only types the bare 10-digit subscriber part), and the client
+// sends the reconstructed "+98"+digits form — so this no longer needs to
+// guess between +98/0098/98/0-prefixed or bare input. It still tolerates
+// an optional "+98" so it validates the same whether given the full
+// reconstructed value or the bare digits directly.
 function iranPhoneSubscriberPart(raw) {
   let v = String(raw ?? '').replace(/\s+/g, '');
   if (v.startsWith('+98')) v = v.slice(3);
-  else if (v.startsWith('0098')) v = v.slice(4);
-  else if (v.startsWith('98') && v.length === 12) v = v.slice(2);
-  else if (v.startsWith('0')) v = v.slice(1);
   return /^9[0-9]{9}$/.test(v) ? v : null;
 }
 
@@ -275,7 +282,7 @@ module.exports = async (req, res) => {
   // or any other value has no effect either way.
   const resolvedShippingMethod = shippingMethodForCity(city);
   const method = SHIPPING[resolvedShippingMethod];
-  const freeShip = !method.payAtDoor && base >= FREE_SHIP_OVER;
+  const freeShip = !method.payAtDoor && !method.neverFree && base >= FREE_SHIP_OVER;
   const shipCost = method.payAtDoor || freeShip ? 0 : method.cost;
   const total = base + shipCost;
 
