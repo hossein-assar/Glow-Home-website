@@ -21,6 +21,12 @@ decisions from code alone — read this before making structural changes.
   sends *which* products and *how many* — the function re-fetches real
   prices/stock from the DB itself, so nobody can tamper with pricing from
   devtools. Never let the browser write directly to `orders`/`order_items`.
+- **Order notifications**: `/api/orders.js` emails the shop on every new
+  order via Resend's API (plain `fetch()`, no SDK). Needs `RESEND_API_KEY`
+  and `ORDER_NOTIFY_EMAIL` set in Vercel's environment variables — never in
+  code. If either is missing, the notification step silently no-ops rather
+  than breaking checkout; a failed send (bad key, Resend outage, etc.) is
+  caught and logged with `console.error` but never surfaces to the customer.
 - **Admin panel**: `/admin/` — plain Supabase-auth login, `is_admin` flag on
   `profiles`. Can edit every product field (price, stock, subcategory, style,
   variants, colors) and view/update order status. This is the only place

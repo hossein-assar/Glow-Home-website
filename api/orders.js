@@ -38,6 +38,63 @@ function parseCartKey(key) {
   return { id, height, colorIndex };
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function toman(n) {
+  return Number(n).toLocaleString('en-US') + ' تومان';
+}
+
+// Best-effort admin notification — never allowed to affect the checkout
+// response either way. Uses a plain fetch() to Resend's API rather than
+// pulling in a new npm dependency for one call.
+async function sendOrderNotificationEmail(order, orderItems) {
+  const apiKey = process.env.RESEND_API_KEY;
+  const notifyTo = process.env.ORDER_NOTIFY_EMAIL;
+  if (!apiKey || !notifyTo) return;
+
+  const itemsHtml = orderItems
+    .map(
+      (it) =>
+        `<li>${escapeHtml(it.name_fa)} — تعداد: ${it.qty} — ${toman(it.unit_price * it.qty)}</li>`
+    )
+    .join('');
+
+  const html = `
+    <div dir="rtl" style="font-family: sans-serif;">
+      <h2>سفارش جدید — ${escapeHtml(order.code)}</h2>
+      <p><strong>مشتری:</strong> ${escapeHtml(order.customer_name)}</p>
+      <p><strong>موبایل:</strong> ${escapeHtml(order.phone)}</p>
+      <p><strong>شهر / نشانی:</strong> ${escapeHtml(order.city)} — ${escapeHtml(order.address)}</p>
+      <h3>اقلام سفارش</h3>
+      <ul>${itemsHtml}</ul>
+      <p><strong>جمع کل:</strong> ${toman(order.total)}</p>
+    </div>
+  `;
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: 'Glow Home <onboarding@resend.dev>',
+      to: [notifyTo],
+      subject: `سفارش جدید — ${order.code}`,
+      html,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Resend API responded ${res.status}: ${text}`);
+  }
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ ok: false, error: 'Method not allowed' });
@@ -183,6 +240,13 @@ module.exports = async (req, res) => {
     await sb.from('orders').delete().eq('id', order.id);
     res.status(500).json({ ok: false, error: 'ثبت اقلام سفارش با خطا مواجه شد. دوباره تلاش کنید.' });
     return;
+  }
+
+  // ---- Notify the shop by email (best-effort, must never break checkout) --
+  try {
+    await sendOrderNotificationEmail(order, orderItems);
+  } catch (notifyErr) {
+    console.error('Order notification email failed:', notifyErr);
   }
 
   res.status(200).json({
