@@ -92,6 +92,14 @@
      than a pure #ff0000 so it doesn't clash with the rest of the palette. */
   --color-red-700: #c0392b;
 
+  /* True blue — used only for the installment/WhatsApp banner in
+     checkout's روش پرداخت, which needs to visually stand apart from every
+     other alert/status color on the site (all warm: mocha accent, sage,
+     the red above). */
+  --color-blue-100: #e8f1fb;
+  --color-blue-300: #a9cdf0;
+  --color-blue-700: #1c5b9e;
+
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -1101,6 +1109,22 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
 }
 .alert-error { background: var(--color-accent-100); color: var(--color-accent-800); border: 1px solid var(--color-accent-200); }
 .alert-info { background: var(--color-sage-100); color: var(--color-sage-700); }
+.alert-whatsapp {
+  background: var(--color-blue-100);
+  color: var(--color-blue-700);
+  border: 1px solid var(--color-blue-300);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.whatsapp-number {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  white-space: nowrap;
+}
 
 .checkout-layout { display: grid; grid-template-columns: 1.5fr 1fr; gap: 34px; align-items: start; }
 .checkout-step { margin-bottom: 34px; }

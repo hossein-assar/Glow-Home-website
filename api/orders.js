@@ -23,11 +23,12 @@ const SUPABASE_URL = 'https://sgfoesnpodvwyzlxfhtq.supabase.co';
 // shippingMethodForCity below) — پست پیشتاز was retired because the
 // Tehran/non-Tehran rule left no city that could ever reach it.
 //
-// neverFree: پیک تهران always costs its full price, even above
-// FREE_SHIP_OVER — تیپاکس needs no such flag since payAtDoor already
-// keeps it out of the free-shipping calculation on its own (see below).
+// Both are payAtDoor — the courier/carrier collects in cash, so neither
+// cost is added to the site's charged total (see freeShip/shipCost
+// below), which already excludes a payAtDoor method from ever being
+// "free" too (no separate neverFree flag needed for that).
 const SHIPPING = {
-  peyk: { label: 'پیک تهران', cost: 90000, payAtDoor: false, neverFree: true },
+  peyk: { label: 'پیک تهران', cost: 90000, payAtDoor: true },
   tipax: { label: 'تیپاکس', cost: 0, payAtDoor: true },
 };
 const FREE_SHIP_OVER = 3000000;
@@ -282,7 +283,7 @@ module.exports = async (req, res) => {
   // or any other value has no effect either way.
   const resolvedShippingMethod = shippingMethodForCity(city);
   const method = SHIPPING[resolvedShippingMethod];
-  const freeShip = !method.payAtDoor && !method.neverFree && base >= FREE_SHIP_OVER;
+  const freeShip = !method.payAtDoor && base >= FREE_SHIP_OVER;
   const shipCost = method.payAtDoor || freeShip ? 0 : method.cost;
   const total = base + shipCost;
 
@@ -309,7 +310,15 @@ module.exports = async (req, res) => {
       postcode: postcode || null,
       note: note ? String(note).trim() || null : null,
       shipping_method: resolvedShippingMethod,
-      shipping_cost: shipCost,
+      // The nominal shipping fee, NOT shipCost — shipCost is 0 for any
+      // payAtDoor method by design (it's excluded from the site's charged
+      // total), but that would also erase the actual known fee amount
+      // (e.g. پیک's ۹۰,۰۰۰ تومان) from the stored order. Keeping the real
+      // fee here means the admin panel/DB still records what the courier
+      // is expected to collect in cash, even though it's not part of
+      // `total`. تیپاکس is unaffected — its own cost is already 0 (its fee
+      // isn't a known fixed amount), so this stores the same 0 either way.
+      shipping_cost: method.cost,
       discount_code: code,
       subtotal,
       total,

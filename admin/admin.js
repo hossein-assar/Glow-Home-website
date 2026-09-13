@@ -391,6 +391,12 @@ const STATUS_LABEL = {
   cancelled: 'لغوشده',
 };
 
+// Mirrors data.js/api/orders.js's SHIPPING — kept in sync by hand, same
+// reasoning as elsewhere in this project (no shared module between the
+// storefront and this panel). Only label + payAtDoor are needed here.
+const SHIPPING_LABEL = { peyk: 'پیک تهران', tipax: 'تیپاکس' };
+const SHIPPING_PAY_AT_DOOR = { peyk: true, tipax: true };
+
 async function loadOrders() {
   const list = document.getElementById('orders-list');
   list.innerHTML = 'در حال بارگذاری...';
@@ -444,7 +450,7 @@ async function loadOrdersSummary() {
 
   const { data: allOrders, error: ordersErr } = await sb
     .from('orders')
-    .select('total, status')
+    .select('total, status, shipping_method, shipping_cost')
     .limit(1000);
 
   if (ordersErr || !allOrders) {
@@ -456,6 +462,16 @@ async function loadOrdersSummary() {
   const revenue = counted.reduce((sum, o) => sum + (o.total || 0), 0);
   const count = counted.length;
   const avg = count ? revenue / count : 0;
+
+  // پس‌کرایه (COD) shipping fees the courier collects directly — never
+  // part of `total`/revenue/AOV above (see the shipping_cost comment in
+  // api/orders.js), so this is purely informational, shown alongside the
+  // note below rather than folded into "درآمد کل". تیپاکس's own fee isn't
+  // a known amount (its shipping_cost is always 0), so it naturally
+  // contributes nothing here regardless.
+  const codShippingTotal = counted
+    .filter((o) => SHIPPING_PAY_AT_DOOR[o.shipping_method])
+    .reduce((sum, o) => sum + (o.shipping_cost || 0), 0);
 
   // Best-sellers by quantity, excluding cancelled orders — same exclusion
   // as revenue/count above, for consistency. order_items has no status of
@@ -504,6 +520,10 @@ async function loadOrdersSummary() {
             : '<div class="stat-value">—</div>'
         }
       </div>
+    </div>
+    <div style="margin-top:10px; font-size:12.5px; color:#8a7d6e">
+      «درآمد کل» و «میانگین ارزش سفارش» شامل هزینه‌ی پس‌کرایه (مثلاً پیک تهران) نمی‌شود — این مبلغ را مشتری نقداً به مأمور تحویل می‌دهد، نه از طریق سایت.
+      ${codShippingTotal ? ` مجموع پس‌کرایه‌ی جمع‌آوری‌شده در همین بازه: ${money(codShippingTotal)}.` : ''}
     </div>`;
 }
 
@@ -532,6 +552,14 @@ function orderCardHtml(o, items) {
           .join('')}
         <div class="order-item-row" style="font-weight:700; margin-top:6px; padding-top:6px; border-top:1px solid var(--divider)">
           <span>جمع کل</span><span>${money(o.total)}</span>
+        </div>
+        <div style="margin-top:8px; color:#6b5f52">
+          روش ارسال: ${escapeHtml(SHIPPING_LABEL[o.shipping_method] || o.shipping_method || '—')}
+          ${
+            SHIPPING_PAY_AT_DOOR[o.shipping_method] && o.shipping_cost > 0
+              ? ` — ${money(o.shipping_cost)} (پس‌کرایه، جدا از مبلغ سفارش)`
+              : ''
+          }
         </div>
         ${o.note ? `<div style="margin-top:8px; color:#6b5f52">یادداشت: ${escapeHtml(o.note)}</div>` : ''}
       </div>

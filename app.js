@@ -241,6 +241,18 @@ function icon(name, cls = 'icon') {
   );
 }
 
+/** A small, widely-recognizable WhatsApp glyph (filled green circle mark) —
+ * doesn't go through icon()/ICON_PATHS above since those are all stroke-
+ * based Lucide-style line icons, the wrong shape entirely for a brand
+ * logo mark. Standalone on purpose; only used next to the installment
+ * banner's WhatsApp number in screenCheckout(). */
+function whatsappIcon() {
+  return `<svg class="whatsapp-icon" viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
+    <circle cx="16" cy="16" r="16" fill="#25D366"/>
+    <path fill="#fff" d="M23.5 8.5c-2-2-4.6-3.1-7.5-3.1-5.8 0-10.6 4.7-10.6 10.6 0 1.9.5 3.7 1.4 5.3L5 26l4.8-1.3c1.5.8 3.2 1.3 5 1.3 5.8 0 10.6-4.7 10.6-10.6 0-2.8-1.1-5.5-3.1-7.5zM16 24.2c-1.6 0-3.1-.4-4.5-1.2l-.3-.2-3.4.9.9-3.3-.2-.3c-.9-1.4-1.4-3.1-1.4-4.8 0-4.9 4-8.9 8.9-8.9 2.4 0 4.6.9 6.3 2.6 1.7 1.7 2.6 3.9 2.6 6.3 0 4.9-4 8.9-8.9 8.9zm4.9-6.7c-.3-.1-1.6-.8-1.8-.9-.2-.1-.4-.1-.6.1-.2.3-.7.9-.8 1-.1.2-.3.2-.5.1-.3-.1-1.1-.4-2.1-1.3-.8-.7-1.3-1.6-1.4-1.8-.1-.2 0-.4.1-.5.1-.1.3-.3.4-.5.1-.1.2-.3.2-.4.1-.2 0-.4 0-.5-.1-.1-.6-1.4-.8-1.9-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.5.1-.7.3-.2.3-.9.9-.9 2.2s.9 2.6 1.1 2.8c.1.2 1.9 2.9 4.6 4 .6.3 1.1.4 1.5.6.6.2 1.2.2 1.6.1.5-.1 1.6-.6 1.8-1.3.2-.6.2-1.2.2-1.3-.1-.1-.2-.2-.5-.3z"/>
+  </svg>`;
+}
+
 /* ---- Derived catalog -----------------------------------------------------
    OUT and ITEMS are rebuilt (not just computed once) because the catalog can
    be replaced at runtime once the live Supabase products load in — see
@@ -472,11 +484,15 @@ function totals() {
   const base = subtotal - discount;
 
   const method = SHIPPING.find((s) => s.id === state.ship) || SHIPPING[0];
-  const freeShip = !method.payAtDoor && !method.neverFree && base >= FREE_SHIP_OVER;
+  // Both پیک and تیپاکس are payAtDoor now, which already excludes a method
+  // from ever being "free" on its own — no separate neverFree flag needed
+  // (removed; it would've been dead weight now that payAtDoor covers it).
+  const freeShip = !method.payAtDoor && base >= FREE_SHIP_OVER;
   const shipCost = method.payAtDoor || freeShip ? 0 : method.cost;
 
-  // Tipax is collect-on-delivery: it is never "free", the customer pays the
-  // courier. Check payAtDoor before the free-shipping threshold.
+  // Pay-at-door methods are never "free" — the customer still pays the
+  // courier, just not through the site. Check payAtDoor before the
+  // free-shipping threshold.
   let shipLabel;
   if (method.payAtDoor) shipLabel = 'پس‌کرایه';
   else if (freeShip) shipLabel = 'رایگان';
@@ -1299,7 +1315,10 @@ function screenCart() {
 
         <div class="ship-hint">${
           t.method.payAtDoor
-            ? 'هزینه‌ی تیپاکس را هنگام تحویل به پیک می‌پردازید و در مبلغ بالا حساب نشده است.'
+            ? 'هزینه‌ی ' +
+              esc(t.method.label) +
+              (t.method.cost ? ' (' + money(t.method.cost) + ')' : '') +
+              ' را هنگام تحویل می‌پردازید و در مبلغ بالا حساب نشده است.'
             : t.freeShip
             ? 'ارسال این سفارش رایگان است.'
             : 'تا ارسال رایگان: ' + money(Math.max(0, FREE_SHIP_OVER - t.base))
@@ -1470,6 +1489,11 @@ function screenCheckout() {
               ? `<div class="alert alert-info">پس از ثبت سفارش شماره کارت را برای شما می‌فرستیم. سفارش بعد از دریافت فیش آماده‌سازی می‌شود.</div>`
               : ''
           }
+          <div class="alert alert-whatsapp">
+            <span>مشتریانی که می‌خواهند پرداخت اقساط داشته باشند از صفحه اسکرین‌شات گرفته و به شماره</span>
+            <span class="whatsapp-number">${whatsappIcon()}۰۹۱۹۵۸۱۹۲۰۳</span>
+            <span>پیام بدهند تا اطلاعات مورد نیاز برایشان ارسال شود</span>
+          </div>
         </section>
       </div>
 
@@ -1500,7 +1524,9 @@ function screenCheckout() {
         <div class="sum-row total"><span>قابل پرداخت</span><span>${money(t.total)}</span></div>
         ${
           t.method.payAtDoor
-            ? `<div class="ship-hint">هزینه‌ی تیپاکس جداگانه هنگام تحویل پرداخت می‌شود.</div>`
+            ? `<div class="ship-hint">هزینه‌ی ${esc(t.method.label)}${
+                t.method.cost ? ' (' + money(t.method.cost) + ')' : ''
+              } جداگانه هنگام تحویل پرداخت می‌شود.</div>`
             : ''
         }
         ${state.error ? `<div class="alert alert-error">${esc(state.error)}</div>` : ''}

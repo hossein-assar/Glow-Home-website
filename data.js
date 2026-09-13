@@ -271,12 +271,15 @@ const FREE_SHIP_OVER = 3000000;
 // shippingMethodForCity() in app.js. پست پیشتاز was retired: the
 // Tehran-only-پیک / everywhere-else-تیپاکس rule left no city that could
 // ever reach it.
-// neverFree: پیک تهران always costs its full price, even above
-// FREE_SHIP_OVER — unlike a normal method, it never gets discounted to
-// free. تیپاکس needs no such flag: payAtDoor already keeps it out of the
-// free-shipping calculation on its own (see totals() in app.js).
+//
+// Both are payAtDoor now — the courier/carrier collects in cash, so
+// neither cost is added to the site's charged total (see totals() in
+// app.js). Unlike تیپاکس, پیک's fee is a known fixed amount, so its own
+// note still states it (تیپاکس's doesn't, since its fee genuinely isn't
+// known ahead of time) — the number stays useful information for the
+// customer even though it's not part of what they pay online.
 const SHIPPING = [
-  { id: 'peyk', label: 'پیک تهران', note: 'همان روز، فقط داخل تهران', cost: 90000, payAtDoor: false, neverFree: true },
+  { id: 'peyk', label: 'پیک تهران', note: 'همان روز، فقط داخل تهران — پس‌کرایه، ۹۰٬۰۰۰ تومان هنگام تحویل می‌پردازید', cost: 90000, payAtDoor: true },
   { id: 'tipax', label: 'تیپاکس', note: 'پس‌کرایه — هزینه را هنگام تحویل می‌پردازید', cost: 0, payAtDoor: true },
 ];
 
