@@ -75,14 +75,31 @@ decisions from code alone — read this before making structural changes.
   option with a reason, and reacts live to شهر edits. `api/orders.js`
   derives the shipping method solely from the validated city — it never
   trusts the client's own `shipping_method` choice, same "don't trust the
-  client" pattern as pricing/stock. پیک تهران additionally never qualifies
-  for the `FREE_SHIP_OVER` free-shipping discount, even above the
-  threshold — its `SHIPPING` entry carries a `neverFree` flag (`data.js` +
-  `api/orders.js`) checked identically in both `totals()` (`app.js`) and
-  the equivalent block in `api/orders.js`, so the UI-displayed total and
-  the actually-charged total can never diverge on this. تیپاکس needs no
-  such flag — its existing `payAtDoor` handling already excludes it from
-  ever being "free" on its own.
+  client" pattern as pricing/stock. Both پیک تهران and تیپاکس are
+  `payAtDoor` now — the courier/carrier collects in cash, so neither cost
+  is added to the site's charged `total` (and `payAtDoor` alone already
+  excludes a method from the `FREE_SHIP_OVER` discount too — there used to
+  be a separate `neverFree` flag for پیک specifically, but it became dead
+  weight once پیک also became `payAtDoor` and was removed). Customer-facing
+  copy deliberately no longer states پیک's ۹۰,۰۰۰ تومان fee anywhere
+  (checkout's order-summary hint, the cart page's equivalent, and the
+  shipping option's own note in `data.js` all now read generically, the
+  same as تیپاکس's phrasing always has) — but the real, known fee is still
+  stored server-side: `api/orders.js` writes `method.cost` (not the
+  charged amount) into `shipping_cost`, so it isn't lost from the database,
+  and the admin panel still surfaces it per-order and in the sales-summary
+  COD note (see below).
+- **Snapp Pay installment banner**: a blue banner at the very top of
+  checkout (above ورود) — static "برای خرید اقساطی با اسنپ‌پی..." prompt
+  plus a بیشتر/بستن toggle button (`state.snappPayOpen`, same accordion
+  pattern as the FAQ page's `state.faqOpen`) that expands an inline
+  7-step purchase-flow card (`SNAPP_PAY_STEPS` in `app.js`, exact business-
+  provided copy — don't reword), pushing the rest of the page down rather
+  than overlaying it. Built as real HTML/CSS blue "step pill" rows, not an
+  embedded image. Ends with `images/snapp-pay-logo.png` again, larger.
+  This replaced an earlier version of the banner that asked customers to
+  screenshot their cart and message a WhatsApp number — that flow and its
+  icon/CSS (`whatsappIcon()`, `.whatsapp-number`) are gone entirely now.
 - **Order notifications**: `/api/orders.js` emails the shop on every new
   order via Resend's API (plain `fetch()`, no SDK). Needs `RESEND_API_KEY`
   and `ORDER_NOTIFY_EMAIL` set in Vercel's environment variables — never in
@@ -106,7 +123,13 @@ decisions from code alone — read this before making structural changes.
   `profiles`. Can edit every product field (price, stock, subcategory, style,
   variants, colors) and view/update order status. This is the only place
   product data is edited now — don't hand-write SQL for routine catalog
-  edits, use the panel.
+  edits, use the panel. Both the products table and the orders list have a
+  live client-side search box (`admin/admin.js`) filtering the already-
+  loaded list in memory — no extra Supabase query per keystroke. Products
+  match against name_fa/name_en/slug/category; orders match against
+  code/customer_name/phone/city. The sales-summary stats above the orders
+  list always reflect *all* orders regardless of the search box — they run
+  their own separate, unfiltered query and never read the search term.
 
 ## Catalog data model (products table)
 
@@ -182,9 +205,13 @@ update both sides.
 
 ## Not yet built
 
-- **Payment gateway** — no ZarinPal/Snapp Pay integration. Checkout creates
-  a real, correctly-priced order but collects no money. The homepage copy
-  currently promises Snapp Pay installments — that's aspirational, not real,
-  as of this writing.
+- **Payment gateway** — no ZarinPal/Snapp Pay *API* integration. Checkout
+  itself still creates a real, correctly-priced order but collects no money
+  automatically. Snapp Pay installments are no longer purely aspirational
+  copy, though: checkout's banner (see above) now walks the customer
+  through a real, if manual/human-in-the-loop, purchase flow (direct
+  message to the shop, admin sends a payment link outside this codebase).
+  There's still no automated gateway callback/webhook here — "not built"
+  refers to that integration, not to the installment option existing at all.
 - **Customer accounts** — guest checkout only, no login, no order history
   for customers.
