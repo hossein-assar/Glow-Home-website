@@ -1118,13 +1118,61 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
   align-items: center;
   gap: 4px 6px;
 }
-.whatsapp-number {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+/* The banner's primary visual anchor — width is intentionally unset so the
+   aspect ratio scales naturally from height alone, no distortion.
+   flex-shrink:0 keeps it from getting squeezed if the banner's text wraps
+   on a narrow viewport. */
+.snapp-pay-logo { height: 24px; width: auto; flex: 0 0 auto; }
+
+/* "بیشتر" toggle — plain text-link styling (no existing storefront class
+   for this), matching the banner's own blue rather than the site's usual
+   warm accent, since it lives inside a blue box. */
+.snapp-pay-more {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-inline-start: auto;
+  font: inherit;
   font-weight: 700;
-  white-space: nowrap;
+  color: var(--color-blue-700);
+  text-decoration: underline;
+  cursor: pointer;
 }
+
+/* Expanded accordion — hidden by default, shown inline (pushes the rest of
+   the page down, not an overlay) when .snapp-pay-banner has .open. Same
+   show/hide-via-parent-class pattern as .faq-item.open .faq-a elsewhere in
+   this file. */
+.snapp-pay-steps { display: none; width: 100%; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--color-blue-300); }
+.snapp-pay-banner.open .snapp-pay-steps { display: block; }
+.snapp-pay-steps h4 { margin: 0 0 10px; font-size: 15px; font-weight: 700; }
+
+.snapp-pay-step-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.snapp-pay-step-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--color-blue-700);
+  color: #fff;
+  border-radius: var(--radius-pill);
+  padding: 10px 16px;
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.snapp-pay-step-num {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--color-blue-700);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 12px;
+}
+.snapp-pay-logo-large { display: block; height: 48px; width: auto; margin: 18px auto 0; }
 
 .checkout-layout { display: grid; grid-template-columns: 1.5fr 1fr; gap: 34px; align-items: start; }
 .checkout-step { margin-bottom: 34px; }

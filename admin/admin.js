@@ -106,6 +106,7 @@ const COLLECTION_LABEL = { lamps: 'آباژور', shades: 'شید', candles: 'ش
 const STYLE_OPTIONS = ['', 'رومیزی', 'کنار سالنی'];
 
 let PRODUCTS_CACHE = [];
+let productSearchTerm = '';
 
 async function loadProducts() {
   const tbody = document.getElementById('products-tbody');
@@ -123,20 +124,51 @@ async function loadProducts() {
   }
 
   PRODUCTS_CACHE = data || [];
+  renderProductsTable();
+}
+
+// Client-side only — PRODUCTS_CACHE is already the full list (loadProducts()
+// doesn't paginate), so there's no reason to round-trip Supabase again just
+// to filter what's already sitting in memory.
+function filteredProducts() {
+  const q = productSearchTerm.trim().toLowerCase();
+  if (!q) return PRODUCTS_CACHE;
+  return PRODUCTS_CACHE.filter((p) => {
+    const haystack = [p.name_fa, p.name_en, p.slug, COLLECTION_LABEL[p.collection] || p.collection]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(q);
+  });
+}
+
+function renderProductsTable() {
+  const tbody = document.getElementById('products-tbody');
 
   if (!PRODUCTS_CACHE.length) {
     tbody.innerHTML = '<tr><td colspan="7">هنوز محصولی ثبت نشده.</td></tr>';
     return;
   }
 
-  tbody.innerHTML = PRODUCTS_CACHE.map(rowHtml).join('');
+  const list = filteredProducts();
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="7">نتیجه‌ای یافت نشد.</td></tr>';
+    return;
+  }
 
-  PRODUCTS_CACHE.forEach((p) => {
+  tbody.innerHTML = list.map(rowHtml).join('');
+
+  list.forEach((p) => {
     document.getElementById(`save-${p.id}`).addEventListener('click', () => saveProduct(p.id));
     document.getElementById(`del-${p.id}`).addEventListener('click', () => deleteProduct(p.id, p.name_fa));
     document.getElementById(`toggle-${p.id}`).addEventListener('click', () => toggleEdit(p.id));
   });
 }
+
+document.getElementById('product-search').addEventListener('input', (e) => {
+  productSearchTerm = e.target.value;
+  renderProductsTable();
+});
 
 function rowHtml(p) {
   return `
@@ -397,6 +429,10 @@ const STATUS_LABEL = {
 const SHIPPING_LABEL = { peyk: 'پیک تهران', tipax: 'تیپاکس' };
 const SHIPPING_PAY_AT_DOOR = { peyk: true, tipax: true };
 
+let ORDERS_CACHE = [];
+let ORDER_ITEMS_BY_ORDER = {};
+let orderSearchTerm = '';
+
 async function loadOrders() {
   const list = document.getElementById('orders-list');
   list.innerHTML = 'در حال بارگذاری...';
@@ -412,31 +448,68 @@ async function loadOrders() {
     return;
   }
 
-  if (!orders.length) {
+  ORDERS_CACHE = orders || [];
+
+  if (!ORDERS_CACHE.length) {
     list.innerHTML = '<p>هنوز سفارشی ثبت نشده.</p>';
     return;
   }
 
-  const orderIds = orders.map((o) => o.id);
+  const orderIds = ORDERS_CACHE.map((o) => o.id);
   const { data: items } = await sb
     .from('order_items')
     .select('*')
     .in('order_id', orderIds);
 
-  const itemsByOrder = {};
+  ORDER_ITEMS_BY_ORDER = {};
   (items || []).forEach((it) => {
-    (itemsByOrder[it.order_id] = itemsByOrder[it.order_id] || []).push(it);
+    (ORDER_ITEMS_BY_ORDER[it.order_id] = ORDER_ITEMS_BY_ORDER[it.order_id] || []).push(it);
   });
 
-  list.innerHTML = orders.map((o) => orderCardHtml(o, itemsByOrder[o.id] || [])).join('');
+  renderOrdersList();
+
+  loadOrdersSummary();
+}
+
+// Client-side only, same reasoning as filteredProducts() above — the list
+// tab is already capped at 100 orders in memory (see loadOrders()), and the
+// sales-summary tab above it runs its own separate, unfiltered Supabase
+// query, so nothing here touches that.
+function filteredOrders() {
+  const q = orderSearchTerm.trim().toLowerCase();
+  if (!q) return ORDERS_CACHE;
+  return ORDERS_CACHE.filter((o) => {
+    const haystack = [o.code, o.customer_name, o.phone, o.city].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
+}
+
+function renderOrdersList() {
+  const list = document.getElementById('orders-list');
+
+  if (!ORDERS_CACHE.length) {
+    list.innerHTML = '<p>هنوز سفارشی ثبت نشده.</p>';
+    return;
+  }
+
+  const orders = filteredOrders();
+  if (!orders.length) {
+    list.innerHTML = '<p>نتیجه‌ای یافت نشد.</p>';
+    return;
+  }
+
+  list.innerHTML = orders.map((o) => orderCardHtml(o, ORDER_ITEMS_BY_ORDER[o.id] || [])).join('');
 
   orders.forEach((o) => {
     const sel = document.getElementById(`order-status-${o.id}`);
     if (sel) sel.addEventListener('change', () => updateOrderStatus(o.id, sel.value));
   });
-
-  loadOrdersSummary();
 }
+
+document.getElementById('order-search').addEventListener('input', (e) => {
+  orderSearchTerm = e.target.value;
+  renderOrdersList();
+});
 
 /* ---- Sales summary --------------------------------------------------------
    The order list above is capped at 100 for display, so it must NOT be the

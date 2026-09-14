@@ -241,18 +241,6 @@ function icon(name, cls = 'icon') {
   );
 }
 
-/** A small, widely-recognizable WhatsApp glyph (filled green circle mark) —
- * doesn't go through icon()/ICON_PATHS above since those are all stroke-
- * based Lucide-style line icons, the wrong shape entirely for a brand
- * logo mark. Standalone on purpose; only used next to the installment
- * banner's WhatsApp number in screenCheckout(). */
-function whatsappIcon() {
-  return `<svg class="whatsapp-icon" viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
-    <circle cx="16" cy="16" r="16" fill="#25D366"/>
-    <path fill="#fff" d="M23.5 8.5c-2-2-4.6-3.1-7.5-3.1-5.8 0-10.6 4.7-10.6 10.6 0 1.9.5 3.7 1.4 5.3L5 26l4.8-1.3c1.5.8 3.2 1.3 5 1.3 5.8 0 10.6-4.7 10.6-10.6 0-2.8-1.1-5.5-3.1-7.5zM16 24.2c-1.6 0-3.1-.4-4.5-1.2l-.3-.2-3.4.9.9-3.3-.2-.3c-.9-1.4-1.4-3.1-1.4-4.8 0-4.9 4-8.9 8.9-8.9 2.4 0 4.6.9 6.3 2.6 1.7 1.7 2.6 3.9 2.6 6.3 0 4.9-4 8.9-8.9 8.9zm4.9-6.7c-.3-.1-1.6-.8-1.8-.9-.2-.1-.4-.1-.6.1-.2.3-.7.9-.8 1-.1.2-.3.2-.5.1-.3-.1-1.1-.4-2.1-1.3-.8-.7-1.3-1.6-1.4-1.8-.1-.2 0-.4.1-.5.1-.1.3-.3.4-.5.1-.1.2-.3.2-.4.1-.2 0-.4 0-.5-.1-.1-.6-1.4-.8-1.9-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.5.1-.7.3-.2.3-.9.9-.9 2.2s.9 2.6 1.1 2.8c.1.2 1.9 2.9 4.6 4 .6.3 1.1.4 1.5.6.6.2 1.2.2 1.6.1.5-.1 1.6-.6 1.8-1.3.2-.6.2-1.2.2-1.3-.1-.1-.2-.2-.5-.3z"/>
-  </svg>`;
-}
-
 /* ---- Derived catalog -----------------------------------------------------
    OUT and ITEMS are rebuilt (not just computed once) because the catalog can
    be replaced at runtime once the live Supabase products load in — see
@@ -349,6 +337,7 @@ const state = {
   error: '',
   order: null,
   faqOpen: 0,
+  snappPayOpen: false, // checkout's اسنپ‌پی banner accordion — not persisted, resets each page load
   trackCode: '',
   trackPhone: '',
   trackLoading: false, // true while /api/track-order is in flight
@@ -1315,10 +1304,7 @@ function screenCart() {
 
         <div class="ship-hint">${
           t.method.payAtDoor
-            ? 'هزینه‌ی ' +
-              esc(t.method.label) +
-              (t.method.cost ? ' (' + money(t.method.cost) + ')' : '') +
-              ' را هنگام تحویل می‌پردازید و در مبلغ بالا حساب نشده است.'
+            ? 'هزینه‌ی ' + esc(t.method.label) + ' را هنگام تحویل می‌پردازید و در مبلغ بالا حساب نشده است.'
             : t.freeShip
             ? 'ارسال این سفارش رایگان است.'
             : 'تا ارسال رایگان: ' + money(Math.max(0, FREE_SHIP_OVER - t.base))
@@ -1345,6 +1331,19 @@ function screenCart() {
   </div>`;
 }
 
+// Business-provided copy, exact wording — see the checkout banner's
+// expanded accordion in screenCheckout(). Numbering is generated, not part
+// of the given text.
+const SNAPP_PAY_STEPS = [
+  'کالای مورد نظرتون رو انتخاب و برای فروشگاه تو دایرکت ارسال کنید.',
+  'جهت نهایی کردن خرید خود، روی لینک پرداخت که از طرف ادمین براتون ارسال میشه کلیک کنید.',
+  'توجه داشته باشید قبل از کلیک روی لینک، وی‌پی‌ان خود را خاموش کنید.',
+  'قیمت مشخص شده رو به صورت دقیق وارد نمایید و گزینه تایید را انتخاب کنید.',
+  'شماره تماسی که با آن اعتبار اسنپ‌پی دارید را وارد نمایید.',
+  'پس از بررسی مشخصات اقساط، دکمه تایید را بزنید و قسط اول را واریز نمایید.',
+  'کد رهگیری رو با استفاده از دکمه کپی موجود کپی کنید و برای فروشگاه در دایرکت ارسال کنید.',
+];
+
 function screenCheckout() {
   syncShippingToCity(); // city may have changed since the last render (see the #city 'change' listener)
   const t = totals();
@@ -1367,6 +1366,25 @@ function screenCheckout() {
   <div class="shell screen">
     <img class="page-motif" src="images/motif-flower.png" alt="">
     <h1 class="page-title">تسویه‌حساب</h1>
+    <div class="alert alert-whatsapp snapp-pay-banner ${state.snappPayOpen ? 'open' : ''}" style="margin-top:18px">
+      <img class="snapp-pay-logo" src="images/snapp-pay-logo.png" alt="Snapp Pay" onerror="this.style.display='none'">
+      <span>برای خرید اقساطی با اسنپ‌پی در ۴ قسط گزینه زیر کلیک کن</span>
+      <button
+        class="snapp-pay-more"
+        data-act="snapp-pay-toggle"
+        aria-expanded="${state.snappPayOpen}"
+        aria-controls="snapp-pay-steps"
+      >${state.snappPayOpen ? 'بستن' : 'بیشتر'}</button>
+      <div class="snapp-pay-steps" id="snapp-pay-steps">
+        <h4>گام‌های خرید از طریق اسنپ‌پی:</h4>
+        <ol class="snapp-pay-step-list">
+          ${SNAPP_PAY_STEPS.map(
+            (step, i) => `<li><span class="snapp-pay-step-num">${FA(i + 1)}</span><span>${esc(step)}</span></li>`
+          ).join('')}
+        </ol>
+        <img class="snapp-pay-logo-large" src="images/snapp-pay-logo.png" alt="Snapp Pay" onerror="this.style.display='none'">
+      </div>
+    </div>
     <div class="checkout-layout" style="margin-top:22px">
       <div>
         <section class="checkout-step">
@@ -1489,11 +1507,6 @@ function screenCheckout() {
               ? `<div class="alert alert-info">پس از ثبت سفارش شماره کارت را برای شما می‌فرستیم. سفارش بعد از دریافت فیش آماده‌سازی می‌شود.</div>`
               : ''
           }
-          <div class="alert alert-whatsapp">
-            <span>مشتریانی که می‌خواهند پرداخت اقساط داشته باشند از صفحه اسکرین‌شات گرفته و به شماره</span>
-            <span class="whatsapp-number">${whatsappIcon()}۰۹۱۹۵۸۱۹۲۰۳</span>
-            <span>پیام بدهند تا اطلاعات مورد نیاز برایشان ارسال شود</span>
-          </div>
         </section>
       </div>
 
@@ -1524,9 +1537,7 @@ function screenCheckout() {
         <div class="sum-row total"><span>قابل پرداخت</span><span>${money(t.total)}</span></div>
         ${
           t.method.payAtDoor
-            ? `<div class="ship-hint">هزینه‌ی ${esc(t.method.label)}${
-                t.method.cost ? ' (' + money(t.method.cost) + ')' : ''
-              } جداگانه هنگام تحویل پرداخت می‌شود.</div>`
+            ? `<div class="ship-hint">هزینه‌ی ${esc(t.method.label)} جداگانه هنگام تحویل پرداخت می‌شود.</div>`
             : ''
         }
         ${state.error ? `<div class="alert alert-error">${esc(state.error)}</div>` : ''}
@@ -2087,6 +2098,11 @@ const ACTIONS = {
   faq: (id) => {
     const i = Number(id);
     state.faqOpen = state.faqOpen === i ? -1 : i;
+    render();
+  },
+
+  'snapp-pay-toggle': () => {
+    state.snappPayOpen = !state.snappPayOpen;
     render();
   },
 

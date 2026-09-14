@@ -274,12 +274,13 @@ const FREE_SHIP_OVER = 3000000;
 //
 // Both are payAtDoor now — the courier/carrier collects in cash, so
 // neither cost is added to the site's charged total (see totals() in
-// app.js). Unlike تیپاکس, پیک's fee is a known fixed amount, so its own
-// note still states it (تیپاکس's doesn't, since its fee genuinely isn't
-// known ahead of time) — the number stays useful information for the
-// customer even though it's not part of what they pay online.
+// app.js). Their notes are now deliberately identical in pattern — پیک's
+// known ۹۰,۰۰۰ تومان fee is NOT restated here; it's still shown to the
+// customer via the order-summary's ship-hint (which reads `cost` directly,
+// unaffected by this) and stored correctly in shipping_cost for the admin
+// panel — this note field alone just no longer duplicates the number.
 const SHIPPING = [
-  { id: 'peyk', label: 'پیک تهران', note: 'همان روز، فقط داخل تهران — پس‌کرایه، ۹۰٬۰۰۰ تومان هنگام تحویل می‌پردازید', cost: 90000, payAtDoor: true },
+  { id: 'peyk', label: 'پیک تهران', note: 'پس‌کرایه — هزینه را هنگام تحویل می‌پردازید', cost: 90000, payAtDoor: true },
   { id: 'tipax', label: 'تیپاکس', note: 'پس‌کرایه — هزینه را هنگام تحویل می‌پردازید', cost: 0, payAtDoor: true },
 ];
 
