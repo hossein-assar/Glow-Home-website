@@ -1369,7 +1369,7 @@ function screenCheckout() {
     <div class="alert alert-whatsapp snapp-pay-banner ${state.snappPayOpen ? 'open' : ''}" style="margin-top:18px">
       <div class="snapp-pay-logo-header">
         <img class="snapp-pay-logo" src="images/snapp-pay-logo.png" alt="Snapp Pay" onerror="this.style.display='none'">
-        <img class="snapp-pay-logo" src="images/snapp-pay-logo-fa.png" alt="اسنپ‌پی" onerror="this.style.display='none'">
+        <img class="snapp-pay-logo snapp-pay-logo-fa" src="images/snapp-pay-logo-fa.png" alt="اسنپ‌پی" onerror="this.style.display='none'">
       </div>
       <span>برای خرید اقساطی با اسنپ‌پی در ۴ قسط گزینه بیشتر کلیک کن</span>
       <button

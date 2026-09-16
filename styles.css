@@ -99,6 +99,13 @@
   --color-blue-100: #e8f1fb;
   --color-blue-300: #a9cdf0;
   --color-blue-700: #1c5b9e;
+  /* Snapp Pay's own brand blue, sampled directly from
+     images/snapp-pay-logo.png's background (#008efa) — deliberately its
+     own variable rather than reusing --color-blue-700 above, since the two
+     don't match and blue-700 is already used elsewhere in this same banner
+     (the step pills, "بیشتر" text) for a purpose unrelated to brand-matching
+     the logo art. */
+  --color-snapp-blue: #008efa;
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -1120,15 +1127,17 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
 }
 /* Logo header — its own full-width row above the banner's text (width:100%
    on a flex item forces a wrap in the parent's flex-wrap row, same trick
-   .snapp-pay-steps uses below). Light surface box so both logos read as the
-   banner's visual anchor against the blue background, not flat against it. */
+   .snapp-pay-steps uses below). Background matches the English logo's own
+   art exactly (--color-snapp-blue) so that logo's square canvas blends into
+   the header with no visible edge, rather than sitting in a box of a
+   different blue. */
 .snapp-pay-logo-header {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 20px;
   width: 100%;
-  background: var(--color-surface);
+  background: var(--color-snapp-blue);
   border-radius: var(--radius-lg);
   padding: 16px 20px;
   margin-bottom: 2px;
@@ -1136,6 +1145,12 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
 /* Width is intentionally unset so each logo's own aspect ratio scales
    naturally from height alone, no distortion. */
 .snapp-pay-logo { height: 48px; width: auto; }
+/* The fa logo's own art is solid Snapp-brand blue (#3d8cf1-ish) on
+   transparent, which would vanish against the header's identically-blue
+   background above — brightness(0) crushes it to solid black regardless of
+   its original hue, invert(1) then flips that to white; alpha (so the
+   anti-aliased edges) is untouched by either filter. */
+.snapp-pay-logo-fa { filter: brightness(0) invert(1); }
 
 /* "بیشتر" toggle — plain text-link styling (no existing storefront class
    for this), matching the banner's own blue rather than the site's usual
