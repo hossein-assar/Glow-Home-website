@@ -246,6 +246,28 @@ main { min-height: 60vh; }
 .header-start { justify-self: start; position: relative; }
 .header-actions { justify-self: end; display: flex; align-items: center; gap: 8px; }
 
+/* Persistent search bar — a second row under the icon/logo row, always
+   visible (not tucked in the hamburger menu, not an icon-only toggle). Full
+   width on phones where every pixel is scarce; capped and centered on wider
+   screens so it doesn't stretch into an oddly long single-line input, while
+   still echoing the centered wordmark above it. */
+.header-search { display: flex; justify-content: center; padding-bottom: 14px; }
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  max-width: 640px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-pill);
+  padding: 9px 16px;
+  transition: border-color 0.15s ease;
+}
+.search-box:focus-within { border-color: var(--color-accent-500); }
+.search-box input { flex: 1; background: none; border: 0; outline: none; font-size: 14.5px; min-width: 0; }
+.search-box svg { color: var(--color-neutral-500); flex: none; }
+
 /* Header logo: the flame+G mark (transparent background, solid tan) with
    the "GLOW HOME DECOR" caption set live in CSS rather than baked into the
    raster — the studio's own baked-in caption is only a few pixels tall at
@@ -304,7 +326,10 @@ main { min-height: 60vh; }
 
 /* ---- Hamburger menu panel (desktop + mobile alike) -----------------------
    A compact dropdown anchored to the hamburger button, not a full-bleed
-   panel — it should read as a small flyout, never as wide as the header. */
+   panel — it should read as a small flyout, never as wide as the header.
+   Search used to live inside this panel; it's now a persistent bar in the
+   header itself (see .header-search / .search-box below), so this panel is
+   nav links only. */
 
 .menu-overlay {
   position: fixed;
@@ -332,37 +357,81 @@ main { min-height: 60vh; }
   to { opacity: 1; transform: none; }
 }
 
-.menu-search {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-pill);
-  padding: 9px 16px;
-  margin-bottom: 6px;
-}
-.menu-search input { flex: 1; background: none; border: 0; outline: none; font-size: 14.5px; min-width: 0; }
-.menu-search svg { color: var(--color-neutral-500); flex: none; }
-
 .menu-nav { display: flex; flex-direction: column; }
-.menu-nav button {
+/* Direct-child combinator deliberately, not a descendant selector: this must
+   style only the top-level rows (خانه/فروشگاه/درباره ما/...) that sit right
+   under nav.menu-nav. A plain ".menu-nav button" used to also match the
+   .menu-nav-link/.menu-nav-toggle buttons nested inside .menu-nav-group
+   below — its width:100% (specificity 0,1,1) beat their own single-class
+   rules (0,1,0) and forced the toggle to claim the whole row width, leaving
+   the link almost no room and wrapping category names one letter per line. */
+.menu-nav > button {
   display: block;
   width: 100%;
   text-align: start;
   background: none;
   border: 0;
+  border-radius: var(--radius-md);
   border-bottom: 1px solid var(--color-divider);
-  padding: 12px 4px;
+  padding: 12px 10px;
   font-size: 15px;
   font-weight: 500;
   color: var(--color-neutral-800);
   cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
-.menu-nav button:last-child { border-bottom: 0; }
-.menu-nav button[aria-current='true'] { font-weight: 700; color: var(--color-accent-700); }
+.menu-nav > button:last-child { border-bottom: 0; }
+.menu-nav > button[aria-current='true'] { font-weight: 700; color: var(--color-accent-700); }
+/* Soft tint on hover/keyboard-focus — same convention as .collection-card
+   elsewhere (an accent-100 tint over the page's own --color-bg tone). None
+   of these rows had any hover feedback before; they felt inert. */
+.menu-nav > button:hover,
+.menu-nav > button:focus-visible { background: var(--color-accent-100); }
 
 .menu-nav-group { display: flex; flex-direction: column; }
+.menu-nav-row { display: flex; align-items: stretch; border-bottom: 1px solid var(--color-divider); }
+.menu-nav-link {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  text-align: start;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-md);
+  padding: 12px 10px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-neutral-800);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.menu-nav-link:hover,
+.menu-nav-link:focus-visible { background: var(--color-accent-100); }
+.menu-nav-link[aria-current='true'] { font-weight: 700; color: var(--color-accent-700); }
+
+/* Separate disclosure button, deliberately apart from .menu-nav-link — the
+   category text still navigates on click same as before; this is the only
+   thing that opens/closes the subcategory list now (see the comment above
+   renderCategoryBlock() in app.js for why it used to be :hover-triggered
+   and isn't anymore). */
+.menu-nav-toggle {
+  flex: 0 0 auto;
+  width: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-neutral-500);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.menu-nav-toggle:hover,
+.menu-nav-toggle:focus-visible { background: var(--color-accent-100); }
+.menu-nav-toggle svg { transition: transform 0.18s ease; }
+.menu-nav-group.open .menu-nav-toggle svg { transform: rotate(180deg); }
+
 .menu-nav-sub {
   display: flex;
   flex-direction: column;
@@ -372,8 +441,7 @@ main { min-height: 60vh; }
   overflow: hidden;
   transition: max-height 0.2s ease, opacity 0.15s ease;
 }
-.menu-nav-group:hover .menu-nav-sub,
-.menu-nav-group:focus-within .menu-nav-sub {
+.menu-nav-group.open .menu-nav-sub {
   max-height: 400px;
   opacity: 1;
 }
@@ -382,7 +450,11 @@ main { min-height: 60vh; }
   font-weight: 400;
   color: var(--color-neutral-600);
   padding-block: 10px;
+  border-radius: var(--radius-md);
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
+.menu-nav-sub button:hover,
+.menu-nav-sub button:focus-visible { background: var(--color-accent-100); }
 .menu-nav-sub button[aria-current='true'] { color: var(--color-accent-700); font-weight: 600; }
 
 /* ---- Typography --------------------------------------------------------- */
@@ -1403,6 +1475,8 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
   .header-top { padding-block: 12px; gap: 8px; }
   .wordmark-badge { height: 46px; }
   .wordmark-caption { font-size: 8.5px; letter-spacing: 0.16em; }
+  .header-search { padding-bottom: 12px; }
+  .search-box { padding: 8px 14px; }
 
   .screen { padding-block: 22px 40px; }
   .block { margin-top: 40px; }

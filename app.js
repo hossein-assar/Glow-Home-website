@@ -347,6 +347,7 @@ const state = {
   contactSent: false,
   contactError: '',
   menuOpen: false,
+  menuCategoryOpen: null, // which nav-menu category (if any) has its subcategories expanded — click-toggled, not hover
   lightbox: null, // { id, index } while the full-screen photo popup is open
   selectedHeight: null, // chosen size on a product page with variants
   selectedColorIndex: 0, // chosen color on a product page with colors
@@ -692,18 +693,40 @@ function header() {
   const renderNavButton = ([key, label, href]) =>
     `<button data-nav="${href}" aria-current="${current === key}">${esc(label)}</button>`;
 
+  // Subcategories used to reveal on plain CSS :hover, which triggered just
+  // from the mouse passing over a category on its way to something lower in
+  // the list — an unrelated row would suddenly pop open and shove everything
+  // below it down. Click-toggled now instead (same data-act/aria-expanded
+  // pattern as the FAQ accordion and the checkout Snapp Pay banner), so it
+  // only ever opens on a deliberate action, keyboard included.
   const renderCategoryBlock = (col) => {
     const c = COLLECTIONS[col];
     const subs = subcategoriesFor(col);
     const isCurrentCol = state.route === 'collection' && state.filter === col;
+    const isOpen = state.menuCategoryOpen === col;
     return `
-      <div class="menu-nav-group">
-        <button data-nav="#/c/${col}" aria-current="${current === 'collection:' + col && state.subFilter === 'all'}">${esc(
-      c.fa
-    )}</button>
+      <div class="menu-nav-group ${isOpen ? 'open' : ''}">
+        <div class="menu-nav-row">
+          <button class="menu-nav-link" data-nav="#/c/${col}" aria-current="${
+      current === 'collection:' + col && state.subFilter === 'all'
+    }">${esc(c.fa)}</button>
+          ${
+            subs.length
+              ? `<button
+                  class="menu-nav-toggle"
+                  type="button"
+                  data-act="menu-category-toggle"
+                  data-id="${col}"
+                  aria-expanded="${isOpen}"
+                  aria-controls="menu-sub-${col}"
+                  aria-label="زیردسته‌های ${esc(c.fa)}"
+                >${icon('chevronDown', 'icon icon-sm')}</button>`
+              : ''
+          }
+        </div>
         ${
           subs.length
-            ? `<div class="menu-nav-sub">
+            ? `<div class="menu-nav-sub" id="menu-sub-${col}">
           ${subs
             .map(
               (s) =>
@@ -721,11 +744,6 @@ function header() {
   const menuPanel = state.menuOpen
     ? `
     <div class="menu-panel" role="dialog" aria-label="فهرست فروشگاه">
-      <div class="menu-search">
-        ${icon('search', 'icon icon-sm')}
-        <input id="q" type="search" placeholder="جست‌وجو در محصولات" value="${esc(state.query)}"
-               aria-label="جست‌وجو در محصولات">
-      </div>
       <nav class="menu-nav" aria-label="بخش‌های فروشگاه">
         ${topItems.map(renderNavButton).join('')}
         ${categoryKeys.map(renderCategoryBlock).join('')}
@@ -760,6 +778,13 @@ function header() {
               ${icon('bag')}
               ${n ? `<span class="badge">${FA(n)}</span>` : ''}
             </button>
+          </div>
+        </div>
+        <div class="header-search">
+          <div class="search-box">
+            ${icon('search', 'icon icon-sm')}
+            <input id="q" type="search" placeholder="جست‌وجو در محصولات" value="${esc(state.query)}"
+                   aria-label="جست‌وجو در محصولات">
           </div>
         </div>
       </div>
@@ -1950,11 +1975,16 @@ const ACTIONS = {
 
   menu: () => {
     state.menuOpen = !state.menuOpen;
+    if (!state.menuOpen) state.menuCategoryOpen = null; // fresh state next time it opens
     render();
-    if (state.menuOpen) document.getElementById('q')?.focus();
   },
   'menu-close': () => {
     state.menuOpen = false;
+    state.menuCategoryOpen = null;
+    render();
+  },
+  'menu-category-toggle': (id) => {
+    state.menuCategoryOpen = state.menuCategoryOpen === id ? null : id;
     render();
   },
 
@@ -2199,6 +2229,7 @@ document.addEventListener('click', (e) => {
     e.preventDefault();
     syncForm();
     state.menuOpen = false;
+    state.menuCategoryOpen = null;
     go(navEl.dataset.nav.replace(/^#\//, ''));
     return;
   }
