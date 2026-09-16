@@ -202,6 +202,18 @@ update both sides.
   guaranteed across all browsers/autofill sources. Worth revisiting if
   real complaints come in — not something to "fix" reactively without
   first checking whether it's actually causing trouble.
+- **Some copy strings intentionally contain raw HTML — don't esc() them**:
+  `heroBody`, every `faq[].a` entry, `COLLECTIONS.decor.blurb`, and
+  `contactHours` in `data.js` deliberately embed `<b>`/`<br>` for inline
+  bold/line-breaks. Their render call sites in `app.js` interpolate these
+  raw (`${COPY.heroBody}`, not `${esc(COPY.heroBody)}`) so the tags work
+  as real markup instead of showing as literal text. `contactHours` was
+  fixed to match this pattern (2026-09) — it used to go through `esc()`
+  at both its call sites, so a `<br>` there would have rendered as visible
+  "<br>" text. If you add a new render call site for any of these fields,
+  or a new field that needs inline HTML, keep using raw interpolation —
+  everything else in the codebase should still go through `esc()` as
+  normal; this is a small, deliberate exception, not a new default.
 
 ## Not yet built
 
