@@ -162,7 +162,14 @@ a { color: inherit; text-decoration: none; cursor: pointer; }
 .shell { max-width: var(--page-max); margin: 0 auto; padding-inline: var(--shell-pad); }
 .shell-narrow { max-width: 780px; margin: 0 auto; padding-inline: var(--shell-pad); }
 
-.screen { position: relative; z-index: 0; padding-block: 34px 70px; }
+/* overflow-x:hidden here contains .page-motif and any other deliberately
+   off-canvas decorative bleed at each screen's own edge. body already has
+   overflow-x:hidden, but that alone wasn't containing this — position:absolute
+   descendants with negative insets were still inflating document scrollWidth
+   measurably (confirmed directly, not assumed), which is what let mobile
+   browsers compute an oversized layout viewport and made the page appear
+   zoomed with a pannable horizontal scroll. */
+.screen { position: relative; z-index: 0; padding-block: 34px 70px; overflow-x: hidden; }
 
 /* Decorative botanical line-art, used sparingly on whitespace-heavy pages
    (About, FAQ, Contact, Track) — never on dense grids like the shop, so it
@@ -869,6 +876,14 @@ button.media.gallery-cover {
   aspect-ratio: 3 / 1;
   min-height: 260px;
   max-height: 420px;
+  /* Without this, aspect-ratio + min-height fight each other on narrow
+     viewports: when the width-derived height (container width ÷ 3) falls
+     below min-height, the browser widens the box to min-height × 3 to keep
+     the ratio — well past the container, since overflow:hidden above only
+     clips this box's own content, not its outer size against its parent.
+     That's what was causing the page-wide horizontal scroll/zoom-looking
+     bug on category pages (the only routes using this component). */
+  max-width: 100%;
   display: flex;
   align-items: flex-end;
   margin-bottom: 30px;
