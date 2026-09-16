@@ -803,7 +803,7 @@ function footer() {
                 ${icon('instagram', 'icon icon-sm')}<span class="ltr">@${esc(COPY.instagram)}</span>
               </a>
               <span class="ltr" style="direction:ltr;text-align:right">${esc(COPY.contactPhone)}</span>
-              <span>${esc(COPY.contactHours)}</span>
+              <span>${COPY.contactHours}</span>
             </div>
           </div>
         </div>
@@ -1150,7 +1150,7 @@ function screenProduct() {
           hasVariants
             ? `
         <div class="field" style="max-width:280px;margin-top:6px">
-          <label for="height-picker">اندازه</label>
+          <label for="height-picker">${p.style === 'کنار سالنی' ? 'اندازه با شید' : 'اندازه'}</label>
           <select id="height-picker" class="input" data-act="select-height">
             ${p.variants
               .map((v) => {
@@ -1707,7 +1707,7 @@ function screenContact() {
         ${icon('phone')}<span class="ltr" style="direction:ltr">${esc(COPY.contactPhone)}</span>
       </div>
       <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
-        ${icon('clock')}<span>${esc(COPY.contactHours)}</span>
+        ${icon('clock')}<span>${COPY.contactHours}</span>
       </div>
     </div>
   </div>`;
