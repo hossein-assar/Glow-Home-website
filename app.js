@@ -1367,8 +1367,11 @@ function screenCheckout() {
     <img class="page-motif" src="images/motif-flower.png" alt="">
     <h1 class="page-title">تسویه‌حساب</h1>
     <div class="alert alert-whatsapp snapp-pay-banner ${state.snappPayOpen ? 'open' : ''}" style="margin-top:18px">
-      <img class="snapp-pay-logo" src="images/snapp-pay-logo.png" alt="Snapp Pay" onerror="this.style.display='none'">
-      <span>برای خرید اقساطی با اسنپ‌پی در ۴ قسط گزینه زیر کلیک کن</span>
+      <div class="snapp-pay-logo-header">
+        <img class="snapp-pay-logo" src="images/snapp-pay-logo.png" alt="Snapp Pay" onerror="this.style.display='none'">
+        <img class="snapp-pay-logo" src="images/snapp-pay-logo-fa.png" alt="اسنپ‌پی" onerror="this.style.display='none'">
+      </div>
+      <span>برای خرید اقساطی با اسنپ‌پی در ۴ قسط گزینه بیشتر کلیک کن</span>
       <button
         class="snapp-pay-more"
         data-act="snapp-pay-toggle"
@@ -1382,7 +1385,9 @@ function screenCheckout() {
             (step, i) => `<li><span class="snapp-pay-step-num">${FA(i + 1)}</span><span>${esc(step)}</span></li>`
           ).join('')}
         </ol>
-        <img class="snapp-pay-logo-large" src="images/snapp-pay-logo.png" alt="Snapp Pay" onerror="this.style.display='none'">
+        <div class="snapp-pay-cta-row">
+          <a class="btn snapp-pay-cta" href="https://social.snapppay.site/0r3z3" target="_blank" rel="noopener noreferrer">خرید اقساط</a>
+        </div>
       </div>
     </div>
     <div class="checkout-layout" style="margin-top:22px">

@@ -1118,11 +1118,24 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
   align-items: center;
   gap: 4px 6px;
 }
-/* The banner's primary visual anchor — width is intentionally unset so the
-   aspect ratio scales naturally from height alone, no distortion.
-   flex-shrink:0 keeps it from getting squeezed if the banner's text wraps
-   on a narrow viewport. */
-.snapp-pay-logo { height: 24px; width: auto; flex: 0 0 auto; }
+/* Logo header — its own full-width row above the banner's text (width:100%
+   on a flex item forces a wrap in the parent's flex-wrap row, same trick
+   .snapp-pay-steps uses below). Light surface box so both logos read as the
+   banner's visual anchor against the blue background, not flat against it. */
+.snapp-pay-logo-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  width: 100%;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  margin-bottom: 2px;
+}
+/* Width is intentionally unset so each logo's own aspect ratio scales
+   naturally from height alone, no distortion. */
+.snapp-pay-logo { height: 48px; width: auto; }
 
 /* "بیشتر" toggle — plain text-link styling (no existing storefront class
    for this), matching the banner's own blue rather than the site's usual
@@ -1172,7 +1185,12 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
   font-weight: 700;
   font-size: 12px;
 }
-.snapp-pay-logo-large { display: block; height: 48px; width: auto; margin: 18px auto 0; }
+/* CTA row — flex-end lands at the visual left on this RTL site (main-axis
+   end = left when dir="rtl"), same convention as .snapp-pay-more's
+   margin-inline-start:auto above. */
+.snapp-pay-cta-row { display: flex; justify-content: flex-end; margin-top: 16px; }
+.snapp-pay-cta { background: var(--color-blue-700); color: #fff; }
+.snapp-pay-cta:hover { background: #17497f; } /* ~12% darker than --color-blue-700; no darker blue token exists yet */
 
 .checkout-layout { display: grid; grid-template-columns: 1.5fr 1fr; gap: 34px; align-items: start; }
 .checkout-step { margin-bottom: 34px; }
