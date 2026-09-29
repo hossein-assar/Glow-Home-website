@@ -800,6 +800,9 @@ function footer() {
           <div>
             <img class="footer-logo" src="images/logo-full-light.png" alt="Glow Home Decor">
             <p class="footer-blurb">${esc(COPY.footerBlurb)}</p>
+            <div class="footer-trust">
+              <a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=7848422&Code=UQNHki85HXENaGvJul3U4Uo9hp3sI29G'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=7848422&Code=UQNHki85HXENaGvJul3U4Uo9hp3sI29G' alt='' style='cursor:pointer' code='UQNHki85HXENaGvJul3U4Uo9hp3sI29G'></a>
+            </div>
           </div>
           <div>
             <h4>فروشگاه</h4>

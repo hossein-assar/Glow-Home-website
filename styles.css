@@ -1414,6 +1414,16 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
 .footer-links button { background: none; border: 0; text-align: start; color: inherit; font-size: inherit; cursor: pointer; padding: 0; }
 .footer-links button:hover, .footer a:hover { color: var(--color-accent-400); }
 .footer-blurb { font-size: 14.5px; line-height: 1.9; max-width: 34ch; margin-top: 12px; white-space: pre-line; }
+.footer-trust { margin-top: 18px; }
+.footer-trust a {
+  display: inline-block;
+  background: #fff;
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  line-height: 0;
+}
+.footer-trust img { display: block; width: 88px; max-width: 100%; height: auto; }
+.static-trust { margin: 0; padding: 24px 16px; text-align: center; }
 .footer-base {
   border-top: 1px solid var(--color-neutral-700);
   margin-top: 30px;

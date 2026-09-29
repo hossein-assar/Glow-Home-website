@@ -20,7 +20,14 @@
 </head>
 <body>
 
-<div id="app"></div>
+<div id="app">
+  <!-- Static copy of the Enamad badge so it's present in the raw HTML for
+       crawlers that don't run JS. app.js replaces #app's contents on first
+       render, and the visible badge then comes from footer() in app.js. -->
+  <div class="footer-trust static-trust">
+    <a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=7848422&Code=UQNHki85HXENaGvJul3U4Uo9hp3sI29G'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=7848422&Code=UQNHki85HXENaGvJul3U4Uo9hp3sI29G' alt='' style='cursor:pointer' code='UQNHki85HXENaGvJul3U4Uo9hp3sI29G'></a>
+  </div>
+</div>
 
 <noscript>
   <div style="max-width:640px;margin:60px auto;padding:24px;text-align:center;font-family:system-ui,sans-serif">
