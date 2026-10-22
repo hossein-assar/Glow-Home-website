@@ -225,6 +225,17 @@ function editPanelHtml(p) {
           </div>
           <div></div>
         </div>
+        <div class="edit-grid" style="margin-top:10px">
+          <div>
+            <label>اندازه بدنه (سانتی‌متر)</label>
+            <input id="f-body-size-${p.id}" value="${escapeAttr(p.body_size || '')}" placeholder="مثلاً: ارتفاع ۱۰ / قطر ۲۵">
+          </div>
+          <div>
+            <label>اندازه شید (سانتی‌متر)</label>
+            <input id="f-shade-size-${p.id}" value="${escapeAttr(p.shade_size || '')}" placeholder="مثلاً: قطر ۳۵ / ارتفاع ۲۰">
+          </div>
+          <div></div>
+        </div>
         <div class="edit-grid wide" style="margin-top:10px">
           <div>
             <label>توضیحات</label>
@@ -315,6 +326,8 @@ async function saveProductFull(id) {
   const heightVal = document.getElementById(`f-height-${id}`).value;
   const height_cm = heightVal ? Number(heightVal) : null;
   const description = document.getElementById(`f-desc-${id}`).value.trim() || null;
+  const body_size = document.getElementById(`f-body-size-${id}`).value.trim() || null;
+  const shade_size = document.getElementById(`f-shade-size-${id}`).value.trim() || null;
 
   const colorsRaw = document.getElementById(`f-colors-${id}`).value.trim();
   const colors = colorsRaw
@@ -330,18 +343,16 @@ async function saveProductFull(id) {
     variants.push({ height: Number(h), price: Number(pr) });
   }
 
+  const fields = { subcategory, style, material, height_cm, description, colors, variants };
+  // body_size / shade_size only exist after supabase/migration-lamp-sizes.sql.
+  // Send them only when the loaded row has them, so a save still works if
+  // this panel is deployed before the migration runs.
+  const cachedRow = PRODUCTS_CACHE.find((x) => x.id === id);
+  if (cachedRow && 'body_size' in cachedRow) Object.assign(fields, { body_size, shade_size });
+
   const { error } = await sb
     .from('products')
-    .update({
-      subcategory,
-      style,
-      material,
-      height_cm,
-      description,
-      colors,
-      variants,
-      updated_at: new Date().toISOString(),
-    })
+    .update({ ...fields, updated_at: new Date().toISOString() })
     .eq('id', id);
 
   if (error) {
@@ -353,8 +364,7 @@ async function saveProductFull(id) {
   // Update the local cache in place rather than reloading the whole table —
   // reloading would collapse this panel immediately, hiding the very
   // confirmation message we're about to show.
-  const cached = PRODUCTS_CACHE.find((x) => x.id === id);
-  if (cached) Object.assign(cached, { subcategory, style, material, height_cm, description, colors, variants });
+  if (cachedRow) Object.assign(cachedRow, fields);
 
   msg.textContent = 'ذخیره شد.';
   msg.className = 'msg ok';
@@ -385,6 +395,12 @@ document.getElementById('btn-add').addEventListener('click', async () => {
     photo_url: document.getElementById('new-photo').value.trim() || null,
     description: document.getElementById('new-desc').value.trim() || null,
   };
+  // Only sent when filled in, so adding a product still works before
+  // supabase/migration-lamp-sizes.sql has run.
+  const newBody = document.getElementById('new-body-size').value.trim();
+  const newShade = document.getElementById('new-shade-size').value.trim();
+  if (newBody) payload.body_size = newBody;
+  if (newShade) payload.shade_size = newShade;
 
   if (!payload.slug || !payload.name_fa) {
     addMsg.textContent = 'Slug و نام فارسی الزامی است.';
@@ -403,7 +419,7 @@ document.getElementById('btn-add').addEventListener('click', async () => {
   addMsg.className = 'msg ok';
   [
     'new-slug', 'new-name-fa', 'new-name-en', 'new-subcategory', 'new-material',
-    'new-height', 'new-price', 'new-photo', 'new-desc',
+    'new-height', 'new-price', 'new-photo', 'new-desc', 'new-body-size', 'new-shade-size',
   ].forEach((id) => (document.getElementById(id).value = ''));
   document.getElementById('new-style').value = '';
   loadProducts();

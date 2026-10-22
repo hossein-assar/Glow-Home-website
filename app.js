@@ -1150,6 +1150,14 @@ function screenCollection() {
   </div>`;
 }
 
+/** Free-text body / shade size from the DB (e.g. 'ارتفاع ۱۰ / قطر ۲۵'),
+ * shown with Persian digits and the same «سانتی‌متر» unit as the height row,
+ * unless the text already names a unit. */
+function sizeFa(s) {
+  const v = FA(String(s).trim());
+  return /سانتی|cm/i.test(v) ? v : v + ' سانتی‌متر';
+}
+
 function screenProduct() {
   const p = byId(state.param);
   if (!p) return `<div class="shell screen">${emptyState()}</div>`;
@@ -1235,6 +1243,8 @@ function screenProduct() {
           <div><dt>دسته</dt><dd>${esc(p.colFa)}</dd></div>
           <div><dt>جنس</dt><dd>${esc(p.materialFa)}</dd></div>
           <div><dt>ارتفاع</dt><dd>${esc(effectiveHeightFa)}</dd></div>
+          ${p.body_size ? `<div><dt>اندازه بدنه</dt><dd>${esc(sizeFa(p.body_size))}</dd></div>` : ''}
+          ${p.shade_size ? `<div><dt>اندازه شید</dt><dd>${esc(sizeFa(p.shade_size))}</dd></div>` : ''}
           <div><dt>ساخت</dt><dd>دست‌ساز، استودیو Glow Home</dd></div>
         </dl>
 
@@ -2487,6 +2497,8 @@ async function loadProductsFromSupabase() {
       variants: Array.isArray(r.variants) ? r.variants : [],
       colors: Array.isArray(r.colors) ? r.colors : [],
       height: r.height_cm ?? HEIGHT_UNKNOWN,
+      body_size: String(r.body_size ?? '').trim() || null,
+      shade_size: String(r.shade_size ?? '').trim() || null,
       material: r.material || '',
       desc: r.description || '',
       photo_url: r.photo_url || null,
