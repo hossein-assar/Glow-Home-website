@@ -297,7 +297,7 @@ const PAYMENTS = [
 // When on, only «درگاه پرداخت آنلاین» goes to the payment server.
 // «کارت به کارت» still uses /api/orders.
 const ONLINE_PAYMENT = {
-  enabled: false,
+  enabled: true,
   apiUrl: 'https://pay.glow-home.ir', // payment-server's public https URL, no trailing slash
 };
 
