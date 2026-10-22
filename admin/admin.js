@@ -421,7 +421,15 @@ const STATUS_LABEL = {
   shipped: 'ارسال‌شده',
   delivered: 'تحویل‌شده',
   cancelled: 'لغوشده',
+  // Online payment (payment-server/). These are NOT real orders yet: the
+  // customer never finished paying. Never ship them.
+  pending_payment: 'پرداخت‌نشده (آنلاین)',
+  payment_failed: 'پرداخت ناموفق (آنلاین)',
 };
+
+// Excluded from revenue / order count / best-sellers, same as 'cancelled'.
+const NOT_COUNTED_STATUSES = ['cancelled', 'pending_payment', 'payment_failed'];
+const UNPAID_ONLINE = new Set(['pending_payment', 'payment_failed']);
 
 // Mirrors data.js/api/orders.js's SHIPPING — kept in sync by hand, same
 // reasoning as elsewhere in this project (no shared module between the
@@ -531,7 +539,7 @@ async function loadOrdersSummary() {
     return;
   }
 
-  const counted = allOrders.filter((o) => o.status !== 'cancelled');
+  const counted = allOrders.filter((o) => !NOT_COUNTED_STATUSES.includes(o.status));
   const revenue = counted.reduce((sum, o) => sum + (o.total || 0), 0);
   const count = counted.length;
   const avg = count ? revenue / count : 0;
@@ -555,7 +563,7 @@ async function loadOrdersSummary() {
   const { data: allItems } = await sb
     .from('order_items')
     .select('name_fa, qty, orders!inner(status)')
-    .neq('orders.status', 'cancelled')
+    .not('orders.status', 'in', `(${NOT_COUNTED_STATUSES.join(',')})`)
     .limit(5000);
 
   const qtyByName = {};
@@ -603,8 +611,14 @@ async function loadOrdersSummary() {
 function orderCardHtml(o, items) {
   const statusClass = 'status-' + (o.status || 'pending');
   const date = o.created_at ? new Date(o.created_at).toLocaleString('fa-IR') : '';
+  const unpaid = UNPAID_ONLINE.has(o.status);
   return `
-    <div class="order-card">
+    <div class="order-card${unpaid ? ' order-card-unpaid' : ''}">
+      ${
+        unpaid
+          ? '<div class="unpaid-banner">پرداخت آنلاین انجام نشده — این سفارش را آماده یا ارسال نکنید.</div>'
+          : ''
+      }
       <div class="order-head">
         <div>
           <b>${escapeHtml(o.code)}</b>
@@ -635,6 +649,7 @@ function orderCardHtml(o, items) {
           }
         </div>
         ${o.note ? `<div style="margin-top:8px; color:#6b5f52">یادداشت: ${escapeHtml(o.note)}</div>` : ''}
+        ${o.payment_method === 'zarinpal' ? paymentInfoHtml(o) : ''}
       </div>
       <div style="margin-top:12px">
         <label style="display:inline;margin-inline-end:8px">وضعیت:</label>
@@ -645,6 +660,16 @@ function orderCardHtml(o, items) {
         </select>
       </div>
     </div>`;
+}
+
+// Online-payment details (columns from supabase/migration-online-payment.sql).
+function paymentInfoHtml(o) {
+  const parts = ['پرداخت آنلاین (زرین‌پال)'];
+  if (o.paid_at) parts.push('پرداخت: ' + escapeHtml(new Date(o.paid_at).toLocaleString('fa-IR')));
+  if (o.payment_ref_id) parts.push('کد پیگیری: <span style="direction:ltr;unicode-bidi:embed">' + escapeHtml(o.payment_ref_id) + '</span>');
+  if (o.payment_card_pan) parts.push('کارت: <span style="direction:ltr;unicode-bidi:embed">' + escapeHtml(o.payment_card_pan) + '</span>');
+  if (!o.paid_at && o.payment_error) parts.push('خطا: ' + escapeHtml(o.payment_error));
+  return `<div style="margin-top:8px; color:#6b5f52">${parts.join(' — ')}</div>`;
 }
 
 async function updateOrderStatus(id, status) {

@@ -127,6 +127,12 @@
   .status-shipped { background: #d6e6f5; color: #245a8a; }
   .status-delivered { background: #cdebe2; color: #1f6e57; }
   .status-cancelled { background: #f3d6d3; color: #a3372a; }
+  .status-pending_payment { background: #ececec; color: #6b6b6b; border: 1px dashed #9a9a9a; }
+  .status-payment_failed { background: #ececec; color: #a3372a; border: 1px dashed #a3372a; }
+  /* Unpaid online checkouts: greyed out, dashed, so they can't be mistaken for real new orders. */
+  .order-card-unpaid { border-style: dashed; background: #f6f6f4; opacity: 0.72; }
+  .order-card-unpaid:hover { opacity: 1; }
+  .unpaid-banner { font-size: 12.5px; font-weight: 600; color: #6b6b6b; margin-bottom: 10px; }
 
   .stat-row { display: flex; gap: 14px; flex-wrap: wrap; }
   .stat-box {

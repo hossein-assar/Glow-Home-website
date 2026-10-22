@@ -343,6 +343,7 @@ const state = {
   trackLoading: false, // true while /api/track-order is in flight
   trackError: '',
   trackData: null, // { code, status, items, total, createdAt } from a matched lookup
+  paymentResult: null, // { code, ok } for the informational #/payment/<code>/<ok|failed> page
   contact: { name: '', phone: '', msg: '' },
   contactSent: false,
   contactError: '',
@@ -521,6 +522,7 @@ function parseHash() {
   const [head, param, sub] = raw.split('/');
   if (head === 'c') return ['collection', param || 'lamps', sub ? decodeURIComponent(sub) : null];
   if (head === 'p') return ['product', param];
+  if (head === 'payment') return ['payment', param || null, sub || null];
   const hit = ROUTES[head];
   return hit ? [hit[0], param || null] : ['home', null];
 }
@@ -551,6 +553,27 @@ function onRouteChange() {
     const p = byId(param);
     state.selectedHeight = p ? p.height : null;
     state.selectedColorIndex = 0;
+  }
+
+  // Landing page after ZarinPal (payment-server's /api/verify redirects
+  // here). Informational only: the URL is not proof of payment, and /track
+  // shows the real status. Only a well-formed order code is ever displayed.
+  if (route === 'payment') {
+    const code = /^GH-[A-Z0-9]{1,20}$/.test(param || '') ? param : null;
+    const ok = subParam === 'ok';
+    state.paymentResult = { code, ok };
+    if (code) {
+      state.trackCode = code.slice(3); // /track only asks for the part after GH-
+      state.trackData = null;
+      state.trackError = '';
+    }
+    if (ok) {
+      state.cart = {};
+      state.appliedCode = null;
+      state.code = '';
+      state.codeMsg = '';
+      saveStore();
+    }
   }
 
   // The confirmation screen is only reachable straight after an order.
@@ -1576,8 +1599,16 @@ function screenCheckout() {
         ${state.error ? `<div class="alert alert-error">${esc(state.error)}</div>` : ''}
         <button class="btn btn-accent btn-block" style="margin-top:18px" data-act="place-order" ${
           state.placingOrder ? 'disabled' : ''
-        }>${state.placingOrder ? 'در حال ثبت سفارش…' : 'ثبت سفارش'}</button>
-        <p class="muted" style="margin-top:12px;font-size:13px">سفارش شما ثبت می‌شود؛ پرداخت طبق روش انتخابی هماهنگ خواهد شد.</p>
+        }>${
+    isOnlinePayment()
+      ? state.placingOrder ? 'در حال انتقال به درگاه…' : 'پرداخت آنلاین'
+      : state.placingOrder ? 'در حال ثبت سفارش…' : 'ثبت سفارش'
+  }</button>
+        <p class="muted" style="margin-top:12px;font-size:13px">${
+          isOnlinePayment()
+            ? 'پس از ثبت سفارش به درگاه امن زرین‌پال منتقل می‌شوید.'
+            : 'سفارش شما ثبت می‌شود؛ پرداخت طبق روش انتخابی هماهنگ خواهد شد.'
+        }</p>
       </aside>
     </div>
   </div>
@@ -1585,7 +1616,9 @@ function screenCheckout() {
   <div class="action-bar">
     <div class="ab-info"><b>${money(t.total)}</b>قابل پرداخت</div>
     <button class="btn btn-accent" data-act="place-order" ${state.placingOrder ? 'disabled' : ''}>${
-    state.placingOrder ? 'در حال ثبت…' : 'ثبت سفارش'
+    isOnlinePayment()
+      ? state.placingOrder ? 'در حال انتقال…' : 'پرداخت آنلاین'
+      : state.placingOrder ? 'در حال ثبت…' : 'ثبت سفارش'
   }</button>
   </div>`;
 }
@@ -1628,6 +1661,40 @@ function screenDone() {
     <div style="display:flex;gap:12px;margin-top:24px;flex-wrap:wrap">
       <button class="btn btn-primary" data-nav="#/shop">ادامه‌ی خرید</button>
       <button class="btn btn-ghost" data-nav="#/track">پیگیری سفارش</button>
+    </div>
+  </div>`;
+}
+
+function screenPayment() {
+  const r = state.paymentResult || { code: null, ok: false };
+  const trackBtn = `<button class="btn ${r.ok ? 'btn-primary' : 'btn-ghost'}" data-nav="#/track">پیگیری سفارش</button>`;
+  return `
+  <div class="shell-narrow screen">
+    <img class="page-motif" src="images/motif-flower.png" alt="">
+    <div class="done">
+      <div class="done-mark">${icon(r.ok ? 'check' : 'x')}</div>
+      <h1 class="page-title">${r.ok ? 'پرداخت انجام شد' : 'پرداخت انجام نشد'}</h1>
+      <p class="lead" style="margin:12px auto 0">${
+        r.ok
+          ? 'از خرید شما سپاسگزاریم. سفارش شما پس از تأیید پرداخت آماده‌سازی می‌شود.'
+          : 'پرداخت این سفارش کامل نشد. سبد خرید شما محفوظ است و می‌توانید دوباره تلاش کنید.'
+      }</p>
+      ${r.code ? `<div class="order-code ltr">${esc(r.code)}</div>` : ''}
+    </div>
+
+    <div class="alert alert-info" style="margin-top:24px">
+      این صفحه فقط برای اطلاع‌رسانی است. وضعیت قطعی پرداخت و سفارش را در «پیگیری سفارش» با کد سفارش و شماره موبایل خود ببینید.
+      ${r.ok ? ' هزینه‌ی ارسال جداگانه هنگام تحویل پرداخت می‌شود.' : ''}
+    </div>
+    ${
+      r.ok
+        ? ''
+        : `<div class="alert alert-error" style="margin-top:12px">اگر مبلغی از حساب شما کسر شده ولی پرداخت تأیید نشده، مبلغ معمولاً ظرف ۷۲ ساعت توسط بانک بازگردانده می‌شود. در غیر این صورت با ما تماس بگیرید.</div>`
+    }
+
+    <div style="display:flex;gap:12px;margin-top:24px;flex-wrap:wrap">
+      ${r.ok ? trackBtn + '<button class="btn btn-ghost" data-nav="#/shop">ادامه‌ی خرید</button>'
+             : '<button class="btn btn-primary" data-nav="#/checkout">تلاش دوباره</button>' + (r.code ? trackBtn : '') + '<button class="btn btn-ghost" data-nav="#/contact">تماس با ما</button>'}
     </div>
   </div>`;
 }
@@ -1749,7 +1816,13 @@ function screenContact() {
 // Which status values light up which step of the three-step tracker.
 // pending/paid -> step 1, preparing -> step 2, shipped/delivered -> step 3.
 // 'cancelled' (and anything unrecognized) maps to 0 — no step highlighted.
+// Online-payment statuses (pending_payment / payment_failed) also map to 0
+// and get their own notice below instead.
 const TRACK_STEP = { pending: 1, paid: 1, preparing: 2, shipped: 3, delivered: 3 };
+const TRACK_PAYMENT_NOTICE = {
+  pending_payment: 'پرداخت آنلاین این سفارش هنوز تأیید نشده است. اگر پرداخت را کامل نکرده‌اید، سفارش ارسال نمی‌شود.',
+  payment_failed: 'پرداخت آنلاین این سفارش ناموفق بود و سفارش ارسال نمی‌شود. اگر مبلغی از حساب شما کسر شده، با ما تماس بگیرید.',
+};
 
 function screenTrack() {
   const d = state.trackData;
@@ -1784,6 +1857,7 @@ function screenTrack() {
 
     ${state.trackError ? `<div class="alert alert-error" style="margin-top:18px">${esc(state.trackError)}</div>` : ''}
     ${cancelled ? `<div class="alert alert-error" style="margin-top:18px">این سفارش لغو شده است.</div>` : ''}
+    ${d && TRACK_PAYMENT_NOTICE[d.status] ? `<div class="alert alert-error" style="margin-top:18px">${esc(TRACK_PAYMENT_NOTICE[d.status])}</div>` : ''}
 
     ${d && !cancelled ? `
       <div class="track-items">
@@ -1817,6 +1891,7 @@ const SCREENS = {
   contact: screenContact,
   faq: screenFaq,
   track: screenTrack,
+  payment: screenPayment,
 };
 
 const TITLES = {
@@ -1831,6 +1906,7 @@ const TITLES = {
   contact: 'تماس — Glow Home',
   faq: 'سوالات متداول — Glow Home',
   track: 'پیگیری سفارش — Glow Home',
+  payment: 'نتیجه‌ی پرداخت — Glow Home',
 };
 
 function render() {
@@ -1922,16 +1998,20 @@ function placeOrder() {
   state.error = '';
   render();
 
+  const payload = {
+    customer: { name: f.name, phone: fullPhone, city: f.city, address: f.address, postcode: f.postcode },
+    note: f.note,
+    items: t.rows.map((r) => ({ cartKey: r.cartKey, qty: r.qty })),
+    shipping_method: state.ship,
+    discount_code: state.appliedCode,
+  };
+
+  if (isOnlinePayment()) return startOnlinePayment(payload, fail);
+
   fetch('/api/orders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      customer: { name: f.name, phone: fullPhone, city: f.city, address: f.address, postcode: f.postcode },
-      note: f.note,
-      items: t.rows.map((r) => ({ cartKey: r.cartKey, qty: r.qty })),
-      shipping_method: state.ship,
-      discount_code: state.appliedCode,
-    }),
+    body: JSON.stringify(payload),
   })
     .then((r) => r.json())
     .then((res) => {
@@ -1971,6 +2051,44 @@ function placeOrder() {
     $('.alert-error')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 }
+
+/* ---- Online payment (ZarinPal, behind ONLINE_PAYMENT.enabled) -----------
+   Only «درگاه پرداخت آنلاین» uses it. «کارت به کارت» and everything else
+   while the flag is off still go through /api/orders above, unchanged. */
+
+function isOnlinePayment() {
+  return ONLINE_PAYMENT.enabled && state.pay === 'gateway';
+}
+
+const ZARINPAL_STARTPAY = /^https:\/\/(payment|sandbox)\.zarinpal\.com\/pg\/StartPay\/[A-Za-z0-9]+$/;
+const GATEWAY_FAIL = 'اتصال به درگاه پرداخت برقرار نشد. لطفاً چند دقیقه بعد دوباره تلاش کنید.';
+
+function startOnlinePayment(payload, fail) {
+  fetch(ONLINE_PAYMENT.apiUrl + '/api/checkout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+    .then((r) => r.json())
+    .then((res) => {
+      if (!res.ok) return fail(res.error || GATEWAY_FAIL);
+      // Only ever leave the site for ZarinPal's own StartPay page.
+      if (typeof res.url !== 'string' || !ZARINPAL_STARTPAY.test(res.url)) return fail(GATEWAY_FAIL);
+      // The cart is kept on purpose: a cancelled payment shouldn't empty
+      // it. It's cleared on the #/payment/<code>/ok page instead.
+      location.href = res.url;
+    })
+    .catch(() => fail(GATEWAY_FAIL));
+}
+
+// Coming back from ZarinPal with the browser's Back button can restore this
+// page from the back/forward cache with the button still disabled.
+window.addEventListener('pageshow', (e) => {
+  if (ONLINE_PAYMENT.enabled && e.persisted && state.placingOrder) {
+    state.placingOrder = false;
+    render();
+  }
+});
 
 const ACTIONS = {
   cart: () => go('cart'),

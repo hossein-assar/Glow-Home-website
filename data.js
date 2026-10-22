@@ -289,6 +289,22 @@ const PAYMENTS = [
   { id: 'card', label: 'کارت به کارت', note: 'شماره کارت را می‌فرستیم، فیش را برای ما بفرستید' },
 ];
 
+// Online payment through ZarinPal (payment-server/, on the Iranian VPS).
+// OFF by default. While `enabled` is false, checkout behaves exactly as
+// before: every order, «درگاه پرداخت آنلاین» included, goes through
+// /api/orders. Turn on only after supabase/migration-online-payment.sql has
+// been run and payment-server is live (see payment-server/README.md).
+// When on, only «درگاه پرداخت آنلاین» goes to the payment server.
+// «کارت به کارت» still uses /api/orders.
+const ONLINE_PAYMENT = {
+  enabled: false,
+  apiUrl: 'https://pay.glow-home.ir', // payment-server's public https URL, no trailing slash
+};
+
+// ⚠ Hand-copied in three places. Change all of them together:
+// data.js (here), api/orders.js, payment-server/src/pricing.js.
+// The same goes for SHIPPING and FREE_SHIP_OVER above. `npm test` in
+// payment-server/ fails if the copies differ.
 const DISCOUNT_CODES = {
   GLOW10: 0.10,
   HANDMADE15: 0.15,

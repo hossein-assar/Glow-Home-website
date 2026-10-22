@@ -32,6 +32,9 @@ const SHIPPING = {
   tipax: { label: 'تیپاکس', cost: 0, payAtDoor: true },
 };
 const FREE_SHIP_OVER = 3000000;
+// ⚠ SHIPPING, FREE_SHIP_OVER and DISCOUNT_CODES are also copied in
+// payment-server/src/pricing.js (online payment) and data.js. Change all
+// three together. `npm test` in payment-server/ fails if they differ.
 const DISCOUNT_CODES = { GLOW10: 0.1, HANDMADE15: 0.15 };
 
 const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹';

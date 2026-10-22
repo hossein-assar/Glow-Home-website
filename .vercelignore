@@ -1,0 +1,3 @@
+# The payment server runs on the Iranian VPS, not on Vercel. Keep its source
+# out of the static site deployment (it would otherwise be publicly served).
+payment-server/
