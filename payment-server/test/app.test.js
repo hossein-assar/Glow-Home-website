@@ -6,7 +6,12 @@ import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
 import { ZarinpalError, describeCode } from '../src/zarinpal.js';
 
-const config = { publicSiteUrl: 'https://glow-home.ir', publicApiUrl: 'https://pay.example.ir', zarinpal: { mode: 'sandbox' } };
+const config = {
+  publicSiteUrl: 'https://glow-home.ir',
+  publicApiUrl: 'https://pay.example.ir',
+  callbackUrl: 'https://pay.example.ir/api/verify',
+  zarinpal: { mode: 'sandbox' },
+};
 
 let orders, items, seq, zp, logs;
 
@@ -108,6 +113,20 @@ test('checkout re-prices, creates pending_payment order, returns StartPay url (R
   assert.equal(zp.calls.request[0].amount, 18000000);
   assert.equal(zp.calls.request[0].callbackUrl, 'https://pay.example.ir/api/verify');
   assert.equal(orders[0].payment_authority, 'S' + '1'.padStart(35, '0'));
+});
+
+test('checkout sends config.callbackUrl to ZarinPal (CALLBACK_URL set)', async () => {
+  server.close();
+  const app = createApp({
+    config: { ...config, callbackUrl: 'https://glow-home.ir/api/pay-callback' },
+    db: fakeDb(),
+    zarinpal: zp,
+    logger: () => {},
+  });
+  await new Promise((r) => { server = app.listen(0, '127.0.0.1', r); });
+  base = `http://127.0.0.1:${server.address().port}`;
+  assert.equal((await checkout()).status, 200);
+  assert.equal(zp.calls.request[0].callbackUrl, 'https://glow-home.ir/api/pay-callback');
 });
 
 test('CORS: www allowed, other origins get no allow-origin header', async () => {

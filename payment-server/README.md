@@ -15,12 +15,37 @@ go through `api/orders.js`.
    inserts the order as `pending_payment`, calls ZarinPal `request.json`,
    saves the Authority, and returns `{ ok, code, url }`. `url` is the
    StartPay page.
-3. ZarinPal sends the customer back to `GET /api/verify?Authority=…&Status=…`.
-   The order is looked up by the saved Authority only. On `Status=OK` the
-   server calls `verify.json` with the stored total, and on code 100/101 it
-   calls the SQL function `mark_order_paid` (idempotent). Then it redirects to
+3. ZarinPal sends the customer back to the `callback_url` (see
+   [Callback URL](#callback-url)), which ends at
+   `GET /api/verify?Authority=…&Status=…` on this server. The order is
+   looked up by the saved Authority only. On `Status=OK` the server calls
+   `verify.json` with the stored total, and on code 100/101 it calls the SQL
+   function `mark_order_paid` (idempotent). Then it redirects to
    `PUBLIC_SITE_URL/#/payment/<code>/<ok|failed>`, which is an
    informational page only. `/track` shows the real status.
+
+### Callback URL
+
+Production ZarinPal only accepts a `callback_url` on the gateway's
+registered domain (`glow-home.ir`). Any other host is rejected with «دسترسی از
+این دامنه مجاز نمی‌باشد…». The sandbox doesn't check this.
+
+- `CALLBACK_URL` unset: the callback is `PUBLIC_API_URL/api/verify` (this
+  server directly). Fine for sandbox.
+- `CALLBACK_URL=https://glow-home.ir/api/pay-callback` (production): ZarinPal
+  sends the customer to the shop's Vercel function `api/pay-callback.js`.
+  It accepts only `Authority` (letters and digits, up to 40 characters) and
+  `Status` (`OK` or `NOK`), drops every other parameter, and answers with a
+  303 to the fixed URL `https://pay.glow-home.ir/api/verify?Authority=…&Status=…`.
+  Bad input gets 400, and methods other than GET get 405.
+
+The full chain is: ZarinPal → `glow-home.ir/api/pay-callback` →
+`pay.glow-home.ir/api/verify` → `glow-home.ir/#/payment/<code>/<ok|failed>`.
+The verify host is hardcoded in `api/pay-callback.js`. If the payment
+server's domain ever changes, change it there too.
+
+The callback actually used is printed at startup in the `server.started`
+log line (`callback_url`).
 
 | Endpoint | |
 |---|---|
@@ -142,8 +167,10 @@ curl -s https://pay.glow-home.ir/health
 ### 4. Going live
 
 1. Test the whole flow in sandbox on the VPS first (`ZARINPAL_MODE=sandbox`).
-2. Set `ZARINPAL_MODE=production` and the real `ZARINPAL_MERCHANT_ID` in
-   `.env`, then `pm2 restart glow-payment --update-env`.
+2. Set `ZARINPAL_MODE=production`, the real `ZARINPAL_MERCHANT_ID` and
+   `CALLBACK_URL=https://glow-home.ir/api/pay-callback` in `.env`, then
+   `pm2 restart glow-payment --update-env`. The shop must already be deployed
+   with `api/pay-callback.js`.
 3. In `data.js` set `ONLINE_PAYMENT.apiUrl` to the server's https URL and
    `enabled: true`, then deploy the site.
 
@@ -160,3 +187,6 @@ human:
   refund it manually if needed.
 - `zarinpal.request_failed` with code `-10`: wrong merchant id, or the VPS IP
   isn't registered at ZarinPal.
+- `zarinpal.request_failed` with code `-14`, or the «دسترسی از این دامنه
+  مجاز نمی‌باشد» page: the callback isn't on the registered domain. Set
+  `CALLBACK_URL` (see [Callback URL](#callback-url)).

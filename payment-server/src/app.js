@@ -106,7 +106,7 @@ export function createApp({ config, db, zarinpal, logger = log }) {
       try {
         authority = await zarinpal.requestPayment({
           amount,
-          callbackUrl: `${config.publicApiUrl}/api/verify`,
+          callbackUrl: config.callbackUrl, // see CALLBACK_URL in config.js
           description: `سفارش ${order.code} — Glow Home`,
           mobile: input.phone,
           orderCode: order.code,

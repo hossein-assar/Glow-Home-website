@@ -22,5 +22,5 @@ const app = createApp({
 
 // Bind to localhost only — nginx terminates TLS and proxies to this port.
 app.listen(config.port, '127.0.0.1', () => {
-  log('info', 'server.started', { port: config.port, zarinpal_mode: config.zarinpal.mode });
+  log('info', 'server.started', { port: config.port, zarinpal_mode: config.zarinpal.mode, callback_url: config.callbackUrl });
 });

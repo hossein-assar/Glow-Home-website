@@ -32,7 +32,11 @@ function required(name) {
 }
 
 function httpsUrl(name, { allowLocalHttp }) {
-  const raw = required(name).replace(/\/+$/, '');
+  return checkUrl(name, required(name), { allowLocalHttp });
+}
+
+function checkUrl(name, value, { allowLocalHttp }) {
+  const raw = value.trim().replace(/\/+$/, '');
   let u;
   try {
     u = new URL(raw);
@@ -56,6 +60,17 @@ export function loadConfig() {
     throw new Error('ZARINPAL_MERCHANT_ID must be a 36-character UUID');
   }
 
+  const publicApiUrl = httpsUrl('PUBLIC_API_URL', { allowLocalHttp: isSandbox });
+
+  // Optional. The callback_url sent to ZarinPal. Production ZarinPal only
+  // accepts a callback on the gateway's registered domain (glow-home.ir),
+  // so there it points at the shop's api/pay-callback.js, which forwards to
+  // this server's /api/verify. Unset: this server's own /api/verify.
+  const callbackRaw = (process.env.CALLBACK_URL || '').trim();
+  const callbackUrl = callbackRaw
+    ? checkUrl('CALLBACK_URL', callbackRaw, { allowLocalHttp: isSandbox })
+    : `${publicApiUrl}/api/verify`;
+
   const port = Number(process.env.PORT || 3000);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT is not valid');
 
@@ -65,7 +80,8 @@ export function loadConfig() {
     zarinpal: Object.freeze({ mode, baseUrl: ZARINPAL_BASE[mode], merchantId }),
     // Plain http://localhost is only accepted in sandbox mode, for local testing.
     publicSiteUrl: httpsUrl('PUBLIC_SITE_URL', { allowLocalHttp: isSandbox }),
-    publicApiUrl: httpsUrl('PUBLIC_API_URL', { allowLocalHttp: isSandbox }),
+    publicApiUrl,
+    callbackUrl,
     port,
   });
 }
