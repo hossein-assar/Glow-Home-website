@@ -196,3 +196,22 @@ test('bucket migration uses exactly the products admin check', () => {
   assert.match(sql, /for select\s+using \(bucket_id = 'product-images'\);/);
   assert.doesNotMatch(sql, /create (or replace )?function/i);
 });
+
+test('drag-and-drop: only the drop handler uploads (files are empty during dragover)', () => {
+  const wire = fnSrc('wirePhotoField');
+  const handler = (event) => {
+    const m = wire.match(new RegExp(`drop\\.addEventListener\\('${event}', \\(e?\\) => \\{?([\\s\\S]*?)\\n  \\}?\\);`));
+    assert.ok(m, `no ${event} handler on the drop box`);
+    return m[1];
+  };
+  const over = handler('dragover');
+  assert.match(over, /e\.preventDefault\(\);/);
+  assert.match(over, /classList\.add\('dragging'\)/);
+  assert.doesNotMatch(over, /upload\(|dataTransfer/);
+  assert.match(handler('dragleave'), /classList\.remove\('dragging'\)/);
+  const drop = handler('drop');
+  assert.match(drop, /e\.preventDefault\(\);/);
+  assert.match(drop, /classList\.remove\('dragging'\)/);
+  assert.match(drop, /e\.dataTransfer && e\.dataTransfer\.files\[0\]/);
+  assert.match(drop, /upload\(file\)/);
+});
