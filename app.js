@@ -965,7 +965,7 @@ function screenHome() {
             ${media({ ...cover, fa: c.fa, en: c.en, col: key })}
             <div>
               <b>${esc(c.fa)}</b>
-              <div class="muted">${FA(counts[key])} قطعه · ${esc(c.material)}</div>
+              <div class="muted">${FA(counts[key])} قطعه</div>
             </div>
           </button>`;
           })
