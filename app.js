@@ -446,6 +446,15 @@ function cartKeyFor(p, height = p.height, colorIndex = 0, shade = 'plain') {
   return key;
 }
 
+/** The key a product card's own "افزودن به سبد" adds: the base size, plus
+ * the plain shade for a product with shade types. null when that isn't a
+ * stored option, so the card opens the product page instead of adding a
+ * line the cart would drop. */
+function cardCartKey(p) {
+  const key = cartKeyFor(p);
+  return hasShadeTypes(p) && !cartLineData(key) ? null : key;
+}
+
 /** Which SHIPPING id is the only valid choice for a given city — 'peyk' for
  * Tehran, 'tipax' for anywhere else, or null if city isn't filled in yet
  * (nothing forced until then). See PROJECT_CONTEXT.md's shipping note. */
@@ -526,9 +535,14 @@ function totals() {
   return { rows, subtotal, discount, base, method, freeShip, shipCost, shipLabel, total: base + shipCost };
 }
 
+/** Returns false (and adds nothing) for a product with shade types when the
+ * key isn't a stored size + shade — the cart would drop that line. */
 function addToCart(id, n = 1) {
+  const p = byId(parseCartKey(id).id);
+  if (p && hasShadeTypes(p) && !cartLineData(id)) return false;
   state.cart[id] = (state.cart[id] || 0) + n;
   saveStore();
+  return true;
 }
 
 function setQty(id, q) {
@@ -926,9 +940,16 @@ function tabbar() {
 
 function card(p) {
   const fav = !!state.favs[p.id];
-  const cartKey = cartKeyFor(p);
-  const inCart = !!state.cart[cartKey];
-  const label = !p.inStock ? 'اطلاع از موجودی' : inCart ? 'در سبد ✓ افزودن دوباره' : 'افزودن به سبد';
+  const cartKey = cardCartKey(p);
+  const inCart = !!cartKey && !!state.cart[cartKey];
+  const label = !p.inStock
+    ? 'اطلاع از موجودی'
+    : !cartKey
+    ? 'انتخاب اندازه'
+    : inCart
+    ? 'در سبد ✓ افزودن دوباره'
+    : 'افزودن به سبد';
+  const act = !p.inStock ? 'ask' : cartKey ? 'add' : 'open';
   return `
     <article class="card">
       <div class="card-media">
@@ -948,7 +969,7 @@ function card(p) {
           ${p.provisional ? '<span class="temp-flag">موقت</span>' : ''}
         </div>
         <button class="btn ${p.inStock ? 'btn-primary' : 'btn-ghost'} btn-block"
-                data-act="${p.inStock ? 'add' : 'ask'}" data-id="${p.inStock ? cartKey : p.id}">${esc(label)}</button>
+                data-act="${act}" data-id="${act === 'add' ? cartKey : p.id}">${esc(label)}</button>
       </div>
     </article>`;
 }
@@ -1201,9 +1222,14 @@ function screenProduct() {
   const related = ITEMS.filter((x) => x.col === p.col && x.id !== p.id).slice(0, 4);
 
   const hasVariants = p.variants && p.variants.length > 1;
-  const effectiveHeight = hasVariants ? state.selectedHeight ?? p.height : p.height;
-  const effectiveVariant = hasVariants ? p.variants.find((v) => v.height === effectiveHeight) : null;
   const hasShades = hasShadeTypes(p);
+  let effectiveHeight = hasVariants ? state.selectedHeight ?? p.height : p.height;
+  // A product with shade types must show and add a stored size; if the base
+  // height isn't one, start on the first stored size instead.
+  if (hasShades && !p.variants.some((v) => v && v.shades && v.height === effectiveHeight)) {
+    effectiveHeight = p.variants.find((v) => v && v.shades).height;
+  }
+  const effectiveVariant = hasVariants ? p.variants.find((v) => v.height === effectiveHeight) : null;
   const effectiveShade = hasShades ? state.selectedShade : null;
   const shadePrice = (v, shade) => (hasShades && v.shades ? Number(v.shades[shade]) : v.price);
   const effectivePrice = effectiveVariant ? shadePrice(effectiveVariant, effectiveShade) : p.price;
@@ -2191,7 +2217,7 @@ const ACTIONS = {
   },
 
   add: (id) => {
-    addToCart(id, 1);
+    if (!addToCart(id, 1)) return go('p/' + parseCartKey(id).id);
     render();
   },
 
@@ -2204,12 +2230,12 @@ const ACTIONS = {
   },
 
   'add-current': (id) => {
-    addToCart(id, state.qty);
+    if (!addToCart(id, state.qty)) return render();
     go('cart');
   },
 
   'buy-now': (id) => {
-    addToCart(id, state.qty);
+    if (!addToCart(id, state.qty)) return render();
     go('checkout');
   },
 
