@@ -326,13 +326,10 @@ const state = {
   codeMsg: '',
   ship: 'peyk', // placeholder until a city is entered — syncShippingToCity() then takes over
   pay: 'gateway',
-  auth: 'guest',
-  otpSent: false,
-  otp: '',
   form: { name: '', phone: '', city: '', cityChoice: '', address: '', postcode: '', note: '' },
   // Per-field checkout errors (point 4) — kept separate from `error` below,
   // which stays for failures with no single field to attach to (empty
-  // cart, OTP, network/server errors).
+  // cart, network/server errors).
   formErrors: { name: '', phone: '', city: '', address: '', postcode: '' },
   error: '',
   order: null,
@@ -1543,29 +1540,6 @@ function screenCheckout() {
     <div class="checkout-layout" style="margin-top:22px">
       <div>
         <section class="checkout-step">
-          <h3>ورود</h3>
-          <div class="option-stack">
-            <button class="option" data-act="auth" data-id="guest" role="radio" aria-checked="${state.auth === 'guest'}">
-              <div><b>خرید بدون عضویت</b><span>فقط شماره تماس و نشانی لازم است</span></div>
-            </button>
-            <button class="option" data-act="auth" data-id="otp" role="radio" aria-checked="${state.auth === 'otp'}">
-              <div><b>ورود با شماره موبایل</b><span>کد تأیید پیامک می‌شود</span></div>
-            </button>
-          </div>
-          ${
-            state.auth === 'otp'
-              ? state.otpSent
-                ? `<div style="margin-top:14px" class="field">
-                     <label for="otp">کد تأیید</label>
-                     <input class="input ltr" id="otp" inputmode="numeric" placeholder="۱۲۳۴" value="${esc(state.otp)}">
-                     <span class="hint">نسخه‌ی نمایشی: هر چهار رقمی پذیرفته می‌شود.</span>
-                   </div>`
-                : `<button class="btn btn-ghost" style="margin-top:14px" data-act="send-otp">ارسال کد تأیید</button>`
-              : ''
-          }
-        </section>
-
-        <section class="checkout-step">
           <h3>نشانی تحویل</h3>
           <div class="form-grid">
             <div class="field">
@@ -2088,8 +2062,6 @@ function syncForm() {
     const cityChoiceEl = document.getElementById('city-choice');
     if (cityChoiceEl) state.form.cityChoice = cityChoiceEl.value;
     syncShippingToCity();
-    const otp = document.getElementById('otp');
-    if (otp) state.otp = otp.value;
   }
   if (state.route === 'contact') {
     const map = { 'c-name': 'name', 'c-phone': 'phone', 'c-msg': 'msg', 'c-website': 'website' };
@@ -2123,7 +2095,7 @@ function placeOrder() {
   Object.keys(FIELD_VALIDATORS).forEach(validateCheckoutField);
   const hasFieldError = Object.values(state.formErrors).some(Boolean);
 
-  state.error = state.auth === 'otp' && state.otp.trim().length < 4 ? 'کد تأیید را وارد کنید.' : '';
+  state.error = '';
 
   if (hasFieldError || state.error) {
     render();
@@ -2375,16 +2347,6 @@ const ACTIONS = {
     render();
   },
 
-  auth: (id) => {
-    syncForm();
-    state.auth = id;
-    render();
-  },
-  'send-otp': () => {
-    syncForm();
-    state.otpSent = true;
-    render();
-  },
   ship: (id) => {
     syncForm();
     state.ship = id;

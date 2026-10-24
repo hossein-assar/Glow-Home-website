@@ -61,7 +61,7 @@ decisions from code alone — read this before making structural changes.
   and re-checked in full on submit so nothing skips validation just by
   never being blurred. The shared `state.error`/`.alert-error` box still
   exists for everything that isn't a single field's problem — empty cart,
-  missing OTP, network/server failures.
+  network/server failures. Checkout is guest-only: no login or OTP step.
 - **Shipping method**: determined entirely by شهر, not chosen freely by the
   customer — تهران gets پیک تهران only, anywhere else (non-empty) gets
   تیپاکس only (`shippingMethodForCity()` in `app.js`, mirrored in

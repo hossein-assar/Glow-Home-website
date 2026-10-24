@@ -32,14 +32,15 @@ fonts/        Farhang + IRANSansX + Marcellus, self-hosted
 copy and new products all live there, and both layouts read from it, so there
 is nothing to keep in sync.
 
-## What works, and what is only pretending
+## What it does
 
-Real: the cart, quantities, discount codes, shipping and free-shipping maths,
-form validation, the order summary, search, filtering and sorting.
-
-Faked: nothing is sent, charged or stored anywhere. Placing an order makes up
-an order code and clears the cart. The OTP accepts any four digits. Order
-tracking returns the same message for any code. The contact form goes nowhere.
+Checkout is guest-only: name, mobile, city, address, then pay. There is no
+customer login or account. Orders are priced on the server from the database
+(never from the browser) and stored in Supabase: online payment goes through
+ZarinPal (`payment-server/`), «کارت به کارت» orders through `/api/orders`.
+Order tracking (`/api/track-order`) needs both the order code and the mobile
+used at checkout. The contact form sends an email to the studio through
+`/api/contact`.
 
 The cart is kept in the browser's own storage, so it survives a refresh on that
 device. It is not an account.
