@@ -109,6 +109,29 @@
   .variant-row { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
   .variant-row input { width: auto; flex: 1; }
   .variant-row button { flex: 0 0 auto; padding: 5px 10px; }
+  .price-input { text-align: left; font-variant-numeric: tabular-nums; }
+  .photo-field { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+  .photo-drop {
+    width: 120px;
+    height: 120px;
+    flex: 0 0 120px;
+    border: 2px dashed var(--divider);
+    border-radius: 12px;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .photo-drop.dragging { border-color: var(--tan-dark); background: #f7efe4; }
+  .photo-drop img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .photo-drop img[hidden], .photo-empty[hidden] { display: none; }
+  .photo-empty { font-size: 12px; color: #8a7d6e; text-align: center; line-height: 1.7; padding: 6px; }
+  .photo-side { flex: 1; min-width: 180px; }
+  .photo-side .msg { margin-top: 6px; }
+  .photo-manual { margin-top: 6px; font-size: 12.5px; color: #6b5f52; }
+  .photo-manual summary { cursor: pointer; }
+  .photo-manual input { margin-top: 6px; }
   .link-btn { background: none; border: 0; color: var(--tan-dark); text-decoration: underline; cursor: pointer; font-size: 13px; padding: 4px 0; }
   .order-card { border: 1px solid var(--divider); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
   .order-head { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px; }
@@ -217,14 +240,14 @@
       <div class="row" style="margin-top:10px">
         <div><label>جنس</label><input id="new-material"></div>
         <div><label>ارتفاع (سانتی‌متر، اختیاری)</label><input id="new-height" type="number"></div>
-        <div><label>قیمت (تومان)</label><input id="new-price" type="number"></div>
+        <div><label>قیمت (تومان)</label><input id="new-price" class="price-input" type="text" inputmode="numeric" dir="ltr"></div>
       </div>
       <div class="row" style="margin-top:10px">
         <div><label>اندازه بدنه (سانتی‌متر، اختیاری)</label><input id="new-body-size" placeholder="مثلاً: ارتفاع ۱۰ / قطر ۲۵"></div>
         <div><label>اندازه شید (سانتی‌متر، اختیاری)</label><input id="new-shade-size" placeholder="مثلاً: قطر ۳۵ / ارتفاع ۲۰"></div>
       </div>
       <div class="row" style="margin-top:10px">
-        <div style="flex:2"><label>آدرس عکس (images/xxx.jpg)</label><input id="new-photo"></div>
+        <div style="flex:2"><label>عکس محصول</label><div id="new-photo-field"></div></div>
         <div style="flex:3"><label>توضیحات</label><input id="new-desc"></div>
       </div>
       <div style="margin-top:14px">
@@ -244,7 +267,7 @@
             <tr>
               <th>نام</th>
               <th>دسته</th>
-              <th>قیمت</th>
+              <th>قیمت (تومان)</th>
               <th class="checkbox-cell">قیمت موقت</th>
               <th class="checkbox-cell">موجود</th>
               <th class="narrow"></th>

@@ -137,6 +137,7 @@ test('a tampered client price for deforme is ignored: the price comes from the D
 test('admin shows one price box per shade type found in the product data', () => {
   const src = read('../../admin/admin.js');
   const code = [
+    ...['toLatinDigits', 'unformatPrice', 'formatPrice'].map((n) => src.match(new RegExp(`function ${n}\\([\\s\\S]*?\\n}\\n`))[0]),
     src.match(/const SHADE_TYPES = [^\n]*\n/)[0],
     src.match(/const shadeKeysOf = [\s\S]*?;\n/)[0],
     src.match(/function shadeVariantRowHtml\([\s\S]*?\n}\n/)[0],
@@ -149,8 +150,8 @@ test('admin shows one price box per shade type found in the product data', () =>
   const placeholders = (html) => [...html.matchAll(/placeholder="([^"]*)"/g)].map((m) => m[1]);
   const gisooRow = shadeVariantRowHtml(0, shadeKeysOf(gisoo), gisoo.variants[0]);
   assert.deepEqual(placeholders(gisooRow), ['ارتفاع (سانتی‌متر)', 'قیمت شید ساده (تومان)', 'قیمت شید گلدوزی (تومان)']);
-  assert.match(gisooRow, /data-shade="embroidered" value="15450000"/);
+  assert.match(gisooRow, /data-shade="embroidered" value="15,450,000"/);
   const deformeRow = shadeVariantRowHtml(0, shadeKeysOf(deforme), deforme.variants[0]);
   assert.deepEqual(placeholders(deformeRow), ['ارتفاع (سانتی‌متر)', 'قیمت شید ساده (تومان)', 'قیمت شید مکرومه (تومان)']);
-  assert.match(deformeRow, /data-shade="macrame" value="13500000"/);
+  assert.match(deformeRow, /data-shade="macrame" value="13,500,000"/);
 });

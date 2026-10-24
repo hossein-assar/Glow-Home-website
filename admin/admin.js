@@ -119,6 +119,280 @@ const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوز�
 const shadeKeysOf = (p) =>
   Object.keys(SHADE_TYPES).filter((k) => p.variants.some((v) => v && v.shades && Object.hasOwn(v.shades, k)));
 
+/* ---- Price inputs --------------------------------------------------------
+   Every price box is a text input (class "price-input") that shows thousands
+   separators while typing (9,100,000). Persian/Arabic digits become English,
+   anything else is dropped. Saving strips the separators again
+   (unformatPrice), so the DB gets the same plain integers as before. */
+
+function toLatinDigits(s) {
+  return String(s ?? '').replace(/[۰-۹٠-٩]/g, (d) => {
+    const fa = '۰۱۲۳۴۵۶۷۸۹'.indexOf(d);
+    return String(fa !== -1 ? fa : '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+  });
+}
+
+/** Digits only ('' when there are none), e.g. '۹٬۱۰۰٬۰۰۰' → '9100000'. */
+function unformatPrice(raw) {
+  return toLatinDigits(raw).replace(/[^0-9]/g, '').slice(0, 15);
+}
+
+/** '9100000' / 9100000 / '۹۱۰۰۰۰۰' → '9,100,000'; '' stays ''. */
+function formatPrice(raw) {
+  const digits = unformatPrice(raw).replace(/^0+(?=[0-9])/, '');
+  return digits.replace(/\B(?=([0-9]{3})+(?![0-9]))/g, ',');
+}
+
+/** Reformats a typed value and keeps the caret after the same digit. */
+function reformatPriceInput(value, caret) {
+  const digitsBefore = formatPrice(value.slice(0, caret)).replace(/,/g, '').length;
+  const formatted = formatPrice(value);
+  let pos = 0;
+  for (let seen = 0; pos < formatted.length && seen < digitsBefore; pos++) {
+    if (formatted[pos] !== ',') seen++;
+  }
+  return { value: formatted, caret: pos };
+}
+
+document.addEventListener('input', (e) => {
+  const el = e.target;
+  if (!el.classList || !el.classList.contains('price-input')) return;
+  const { value, caret } = reformatPriceInput(el.value, el.selectionStart ?? el.value.length);
+  if (value !== el.value) el.value = value;
+  if (document.activeElement === el) el.setSelectionRange(caret, caret);
+});
+
+/* ---- Photo upload ----------------------------------------------------------
+   «انتخاب عکس از کامپیوتر» (or drag-and-drop onto the preview): the photo is
+   checked, turned upright (the browser applies the EXIF orientation when
+   decoding), shrunk to at most 1600 px on the longest side, re-encoded as
+   JPEG 0.85 (a PNG with transparency stays PNG), and uploaded to the public
+   Supabase Storage bucket «product-images» (supabase/migration-product-
+   images-bucket.sql). Its public URL goes into the photo field; the product
+   itself is only saved by the usual save button. Old files are never
+   deleted. */
+
+const PHOTO_BUCKET = 'product-images';
+const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const PHOTO_MAX_BYTES = 15 * 1024 * 1024;
+const PHOTO_MAX_SIDE = 1600;
+const photoUploads = new Set(); // photo fields with an upload in flight
+
+/** '' when the file may be processed, else a Persian error. */
+function checkPhotoFile(file) {
+  if (!file || !PHOTO_TYPES.includes(file.type)) return 'این فایل عکس نیست. فقط JPG، PNG یا WebP انتخاب کنید.';
+  if (file.size > PHOTO_MAX_BYTES) return 'حجم عکس بیشتر از ۱۵ مگابایت است. عکس کوچک‌تری انتخاب کنید.';
+  return '';
+}
+
+/** Fits width × height inside max × max, keeping the ratio; never enlarges. */
+function fitWithin(width, height, max) {
+  const scale = Math.min(1, max / Math.max(width, height));
+  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+}
+
+/** Safe ASCII storage name: <slug or "product">-<timestamp>.<ext>. */
+function photoFileName(slug, now, ext) {
+  const base = String(slug ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
+  return `${base || 'product'}-${now}.${ext === 'png' ? 'png' : 'jpg'}`;
+}
+
+/** Preview src for a stored path. Old relative paths ("images/x.jpg") are
+ * relative to the site root, but this page lives under /admin/. */
+function resolvePhotoSrc(path) {
+  const p = String(path ?? '').trim();
+  if (!p) return '';
+  if (/^https?:\/\//i.test(p) || p.startsWith('/')) return p;
+  return '/' + p;
+}
+
+async function decodePhoto(file) {
+  if (window.createImageBitmap) {
+    try {
+      return await createImageBitmap(file, { imageOrientation: 'from-image' });
+    } catch {
+      // fall through to <img>, which also applies EXIF orientation
+    }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return img;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Resized, upright, re-encoded photo: { blob, ext, type }. */
+async function preparePhoto(file) {
+  const src = await decodePhoto(file);
+  const { width, height } = fitWithin(src.width, src.height, PHOTO_MAX_SIDE);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(src, 0, 0, width, height);
+
+  let keepPng = false;
+  if (file.type === 'image/png') {
+    const data = ctx.getImageData(0, 0, width, height).data;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] < 255) {
+        keepPng = true;
+        break;
+      }
+    }
+  }
+  if (!keepPng) {
+    // JPEG has no transparency: put any see-through pixels on white, not black.
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, width, height);
+  }
+  const type = keepPng ? 'image/png' : 'image/jpeg';
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, 0.85));
+  if (!blob) throw new Error('canvas.toBlob returned null');
+  return { blob, ext: keepPng ? 'png' : 'jpg', type };
+}
+
+function photoUploadError(error) {
+  const m = String((error && (error.message || error.error)) || '');
+  if (/bucket not found/i.test(m)) return 'فضای عکس‌ها هنوز ساخته نشده است. با پشتیبانی فنی تماس بگیرید.';
+  if (/row-level security|unauthorized|not allowed|403/i.test(m)) return 'اجازه‌ی آپلود ندارید. دوباره وارد پنل شوید.';
+  if (/size|too large|413/i.test(m)) return 'حجم عکس بعد از فشرده‌سازی هنوز زیاد است. عکس دیگری انتخاب کنید.';
+  return 'آپلود انجام نشد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.';
+}
+
+/** Markup for one photo field; `key` is "new" or a product id. The URL input
+ * (id = urlInputId) is what the save code reads, as before. */
+function photoFieldHtml(key, urlInputId, path) {
+  const src = resolvePhotoSrc(path);
+  return `
+    <div class="photo-field">
+      <div class="photo-drop" id="photo-drop-${key}" title="عکس را اینجا رها کنید">
+        <img id="photo-preview-${key}" alt="" ${src ? `src="${escapeAttr(src)}"` : 'hidden'}>
+        <span class="photo-empty" id="photo-empty-${key}" ${src ? 'hidden' : ''}>بدون عکس<br>عکس را اینجا رها کنید</span>
+      </div>
+      <div class="photo-side">
+        <button type="button" class="btn ghost" id="photo-pick-${key}">انتخاب عکس از کامپیوتر</button>
+        <input type="file" id="photo-file-${key}" accept="image/jpeg,image/png,image/webp" hidden>
+        <div class="msg" id="photo-status-${key}"></div>
+        <details class="photo-manual">
+          <summary>آدرس دستی (پیشرفته)</summary>
+          <input id="${urlInputId}" dir="ltr" value="${escapeAttr(path || '')}" placeholder="images/xxx.jpg">
+        </details>
+      </div>
+    </div>`;
+}
+
+/** Wires a rendered photo field. slugOf() gives the product slug for the file name. */
+function wirePhotoField(key, urlInputId, slugOf) {
+  const drop = document.getElementById(`photo-drop-${key}`);
+  const preview = document.getElementById(`photo-preview-${key}`);
+  const empty = document.getElementById(`photo-empty-${key}`);
+  const pick = document.getElementById(`photo-pick-${key}`);
+  const fileInput = document.getElementById(`photo-file-${key}`);
+  const status = document.getElementById(`photo-status-${key}`);
+  const urlInput = document.getElementById(urlInputId);
+
+  const showPreview = (path) => {
+    const src = resolvePhotoSrc(path);
+    preview.hidden = !src;
+    empty.hidden = !!src;
+    if (src) preview.src = src;
+    else preview.removeAttribute('src');
+  };
+  const setStatus = (text, cls = '') => {
+    status.textContent = text;
+    status.className = 'msg' + (cls ? ' ' + cls : '');
+  };
+
+  async function upload(file) {
+    if (photoUploads.has(key)) return;
+    const problem = checkPhotoFile(file);
+    if (problem) return setStatus(problem, 'error');
+
+    photoUploads.add(key);
+    pick.disabled = true;
+    setStatus('در حال آپلود…');
+    try {
+      let prepared;
+      try {
+        prepared = await preparePhoto(file);
+      } catch (err) {
+        console.error('[admin] photo decode failed:', err);
+        return setStatus('این عکس باز نشد. فایل دیگری را امتحان کنید.', 'error');
+      }
+      const name = photoFileName(slugOf(), Date.now(), prepared.ext);
+      const { error } = await sb.storage
+        .from(PHOTO_BUCKET)
+        .upload(name, prepared.blob, { contentType: prepared.type, cacheControl: '31536000', upsert: false });
+      if (error) {
+        console.error('[admin] photo upload failed:', error);
+        return setStatus(photoUploadError(error), 'error');
+      }
+      const { data } = sb.storage.from(PHOTO_BUCKET).getPublicUrl(name);
+      urlInput.value = data.publicUrl;
+      showPreview(data.publicUrl);
+      setStatus('عکس آپلود شد. برای ثبت، محصول را ذخیره کنید.', 'ok');
+    } catch (err) {
+      console.error('[admin] photo upload failed:', err);
+      setStatus(photoUploadError(err), 'error');
+    } finally {
+      photoUploads.delete(key);
+      pick.disabled = false;
+      fileInput.value = '';
+    }
+  }
+
+  pick.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => fileInput.files[0] && upload(fileInput.files[0]));
+  urlInput.addEventListener('input', () => showPreview(urlInput.value));
+  preview.addEventListener('error', () => setStatus('این عکس نمایش داده نمی‌شود. آدرس را بررسی کنید.', 'error'));
+  drop.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    drop.classList.add('dragging');
+  });
+  drop.addEventListener('dragleave', () => drop.classList.remove('dragging'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('dragging');
+    const file = e.dataTransfer && e.dataTransfer.files[0];
+    if (file) upload(file);
+  });
+}
+
+// A photo dropped next to (not onto) a drop box must not make the browser
+// leave the panel to open the image.
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
+
+document.getElementById('new-photo-field').innerHTML = photoFieldHtml('new', 'new-photo', '');
+wirePhotoField('new', 'new-photo', () => document.getElementById('new-slug').value);
+
+/** The photo the storefront shows first: photos[0] when there is a gallery,
+ * else photo_url (same rule as app.js). */
+function mainPhoto(p) {
+  return (Array.isArray(p.photos) && p.photos[0]) || p.photo_url || '';
+}
+
+/** Fields to save when the main photo changed: photo_url and photos[0] move
+ * together (the rest of the gallery stays); null when unchanged. */
+function mainPhotoFields(p, newPath) {
+  const path = String(newPath ?? '').trim();
+  if (path === mainPhoto(p)) return null;
+  const fields = { photo_url: path };
+  if (Array.isArray(p.photos) && p.photos.length) fields.photos = [path, ...p.photos.slice(1)];
+  return fields;
+}
+
 let PRODUCTS_CACHE = [];
 let productSearchTerm = '';
 
@@ -193,7 +467,7 @@ function rowHtml(p) {
         <button class="link-btn" id="toggle-${p.id}" style="padding:2px 0">ویرایش کامل ▾</button>
       </td>
       <td>${COLLECTION_LABEL[p.collection] || escapeHtml(p.collection)}</td>
-      <td><input type="number" id="price-${p.id}" value="${p.price}" style="width:110px"></td>
+      <td><input type="text" inputmode="numeric" dir="ltr" class="price-input" id="price-${p.id}" value="${formatPrice(p.price)}" style="width:120px"></td>
       <td class="checkbox-cell"><input type="checkbox" id="prov-${p.id}" ${p.price_provisional ? 'checked' : ''}></td>
       <td class="checkbox-cell"><input type="checkbox" id="stock-${p.id}" ${p.in_stock ? 'checked' : ''}></td>
       <td class="narrow"><button class="btn ghost" id="save-${p.id}" style="padding:6px 12px">ذخیره</button></td>
@@ -253,6 +527,12 @@ function editPanelHtml(p) {
         </div>
         <div class="edit-grid wide" style="margin-top:10px">
           <div>
+            <label>عکس اصلی</label>
+            ${photoFieldHtml(p.id, `f-photo-${p.id}`, mainPhoto(p))}
+          </div>
+        </div>
+        <div class="edit-grid wide" style="margin-top:10px">
+          <div>
             <label>توضیحات</label>
             <input id="f-desc-${p.id}" value="${escapeAttr(p.description || '')}">
           </div>
@@ -282,7 +562,7 @@ function variantRowHtml(pid, i, height, price) {
   return `
     <div class="variant-row" data-idx="${i}">
       <input type="number" placeholder="ارتفاع (سانتی‌متر)" class="v-height" value="${height ?? ''}">
-      <input type="number" placeholder="قیمت (تومان)" class="v-price" value="${price ?? ''}">
+      <input type="text" inputmode="numeric" dir="ltr" placeholder="قیمت (تومان)" class="v-price price-input" value="${formatPrice(price)}">
       <button class="btn ghost remove-variant" type="button">حذف</button>
     </div>`;
 }
@@ -295,7 +575,7 @@ function shadeVariantRowHtml(i, shadeKeys, v = {}) {
       ${shadeKeys
         .map(
           (k) =>
-            `<input type="number" placeholder="قیمت ${SHADE_TYPES[k]} (تومان)" class="v-shade-price" data-shade="${k}" value="${sh[k] ?? ''}">`
+            `<input type="text" inputmode="numeric" dir="ltr" placeholder="قیمت ${SHADE_TYPES[k]} (تومان)" class="v-shade-price price-input" data-shade="${k}" value="${formatPrice(sh[k])}">`
         )
         .join('')}
       <button class="btn ghost remove-variant" type="button">حذف</button>
@@ -328,6 +608,7 @@ function toggleEdit(id) {
   });
   wireVariantRemove(document.getElementById(`variants-list-${id}`));
 
+  wirePhotoField(id, `f-photo-${id}`, () => p.slug);
   document.getElementById(`save-full-${id}`).addEventListener('click', () => saveProductFull(id));
 }
 
@@ -338,7 +619,7 @@ function wireVariantRemove(list) {
 }
 
 async function saveProduct(id) {
-  const price = Number(document.getElementById(`price-${id}`).value) || 0;
+  const price = Number(unformatPrice(document.getElementById(`price-${id}`).value)) || 0;
   const price_provisional = document.getElementById(`prov-${id}`).checked;
   const in_stock = document.getElementById(`stock-${id}`).checked;
 
@@ -356,6 +637,11 @@ async function saveProduct(id) {
 
 async function saveProductFull(id) {
   const msg = document.getElementById(`save-full-msg-${id}`);
+  if (photoUploads.has(id)) {
+    msg.textContent = 'صبر کنید تا آپلود عکس تمام شود.';
+    msg.className = 'msg error';
+    return;
+  }
   msg.textContent = 'در حال ذخیره...';
   msg.className = 'msg';
 
@@ -385,7 +671,7 @@ async function saveProductFull(id) {
     for (const row of variantRows) {
       const h = Number(row.querySelector('.v-height').value);
       const shades = {};
-      for (const input of row.querySelectorAll('.v-shade-price')) shades[input.dataset.shade] = Number(input.value);
+      for (const input of row.querySelectorAll('.v-shade-price')) shades[input.dataset.shade] = Number(unformatPrice(input.value));
       const complete = shadeKeys.every((k) => isPrice(shades[k]));
       if (!isPrice(h) || !complete || variants.some((v) => v.height === h)) {
         msg.textContent = 'خطا: برای هر اندازه، ارتفاع (تکراری نباشد) و همه‌ی قیمت‌های شید را وارد کنید.';
@@ -406,14 +692,23 @@ async function saveProductFull(id) {
   } else {
     for (const row of variantRows) {
       const h = row.querySelector('.v-height').value;
-      const pr = row.querySelector('.v-price').value;
+      const pr = unformatPrice(row.querySelector('.v-price').value);
       if (h === '' || pr === '') continue;
       variants.push({ height: Number(h), price: Number(pr) });
     }
   }
 
+  const photoPath = document.getElementById(`f-photo-${id}`).value.trim();
+  if (!photoPath && mainPhoto(cachedRow || {})) {
+    msg.textContent = 'خطا: عکس اصلی را نمی‌توان خالی گذاشت. برای عوض کردن، عکس دیگری انتخاب کنید.';
+    msg.className = 'msg error';
+    return;
+  }
+
   const fields = { subcategory, style, material, height_cm, description, colors, variants };
   if (basePrice != null) fields.price = basePrice;
+  const photoFields = mainPhotoFields(cachedRow || {}, photoPath);
+  if (photoFields) Object.assign(fields, photoFields);
   // body_size / shade_size only exist after supabase/migration-lamp-sizes.sql.
   // Send them only when the loaded row has them, so a save still works if
   // this panel is deployed before the migration runs.
@@ -451,6 +746,11 @@ async function deleteProduct(id, name) {
 
 document.getElementById('btn-add').addEventListener('click', async () => {
   const addMsg = document.getElementById('add-msg');
+  if (photoUploads.has('new')) {
+    addMsg.textContent = 'صبر کنید تا آپلود عکس تمام شود.';
+    addMsg.className = 'msg error';
+    return;
+  }
   const payload = {
     slug: document.getElementById('new-slug').value.trim(),
     name_fa: document.getElementById('new-name-fa').value.trim(),
@@ -460,7 +760,7 @@ document.getElementById('btn-add').addEventListener('click', async () => {
     style: document.getElementById('new-style').value || null,
     material: document.getElementById('new-material').value.trim() || null,
     height_cm: document.getElementById('new-height').value ? Number(document.getElementById('new-height').value) : null,
-    price: Number(document.getElementById('new-price').value) || 0,
+    price: Number(unformatPrice(document.getElementById('new-price').value)) || 0,
     photo_url: document.getElementById('new-photo').value.trim() || null,
     description: document.getElementById('new-desc').value.trim() || null,
   };
@@ -491,6 +791,8 @@ document.getElementById('btn-add').addEventListener('click', async () => {
     'new-height', 'new-price', 'new-photo', 'new-desc', 'new-body-size', 'new-shade-size',
   ].forEach((id) => (document.getElementById(id).value = ''));
   document.getElementById('new-style').value = '';
+  document.getElementById('new-photo').dispatchEvent(new Event('input')); // clear the preview
+  document.getElementById('photo-status-new').textContent = '';
   loadProducts();
 });
 
