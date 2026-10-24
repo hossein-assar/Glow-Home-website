@@ -5,17 +5,6 @@ const appView = document.getElementById('app-view');
 const notAdminView = document.getElementById('not-admin-view');
 const loginMsg = document.getElementById('login-msg');
 
-let isSignupMode = false;
-
-document.getElementById('toggle-signup').addEventListener('click', () => {
-  isSignupMode = !isSignupMode;
-  document.getElementById('btn-signin').textContent = isSignupMode ? 'ثبت‌نام' : 'ورود';
-  document.getElementById('toggle-signup').textContent = isSignupMode
-    ? 'حساب دارید؟ وارد شوید'
-    : 'حساب ندارید؟ ثبت‌نام کنید';
-  loginMsg.textContent = '';
-});
-
 document.getElementById('btn-signin').addEventListener('click', async () => {
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
@@ -27,20 +16,13 @@ document.getElementById('btn-signin').addEventListener('click', async () => {
   loginMsg.textContent = 'در حال بررسی...';
   loginMsg.className = 'msg';
 
-  const { error } = isSignupMode
-    ? await sb.auth.signUp({ email, password })
-    : await sb.auth.signInWithPassword({ email, password });
+  // Log in only. Admin accounts are created in the Supabase dashboard
+  // (Authentication → Add user), never from this page.
+  const { error } = await sb.auth.signInWithPassword({ email, password });
 
   if (error) {
     loginMsg.textContent = error.message;
     loginMsg.className = 'msg error';
-    return;
-  }
-
-  if (isSignupMode) {
-    loginMsg.textContent =
-      'حساب ساخته شد. اگر تأیید ایمیل فعال است، ایمیل خود را چک کنید، سپس وارد شوید.';
-    loginMsg.className = 'msg ok';
     return;
   }
 
