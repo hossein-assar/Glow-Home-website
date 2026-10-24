@@ -14,7 +14,7 @@ const grab = (re) => {
   return m[0];
 };
 const renderSrc = grab(/let lastChrome = '';[\s\S]*?\nfunction render\(\) \{[\s\S]*?\n}\n/);
-const searchSrc = grab(/function onSearchInput\([\s\S]*?document\.addEventListener\('compositionend'[\s\S]*?\n}\);\n/);
+const searchSrc = grab(/\/\/ Live search from the header[\s\S]*?document\.addEventListener\('input', \(e\) => \{\n  if \(e\.target\.id !== 'q'\) return;[\s\S]*?\n}\);\n/);
 
 /** #app holds a <header> node (owning the #q input) followed by one node for
  * everything after it — enough for render()'s two paths. */
@@ -119,24 +119,26 @@ test('editing in the middle keeps the caret where it is', () => {
   assert.equal(box.selectionEnd, 1);
 });
 
-test('IME composition: no render until compositionend', () => {
+test('IME composition: results update on every input event, and the input stays the same focused node', () => {
   const { doc, state, env, main, fire } = makeEnv();
   state.route = 'shop';
   env.render();
   const box = doc.getElementById('q');
   box.focus();
 
-  box.value = 'سل';
-  fire('input', box, { isComposing: true });
-  assert.equal(state.query, '');
-  assert.match(main(), /SHOP\[\]/);
-
-  box.value = 'سلام';
-  fire('compositionend', box);
-  assert.equal(state.query, 'سلام');
-  assert.match(main(), /SHOP\[سلام\]/);
-  assert.equal(doc.getElementById('q'), box);
-  assert.equal(doc.activeElement, box);
+  for (const text of ['س', 'سل', 'سلا']) {
+    box.value = text;
+    box.selectionStart = box.selectionEnd = text.length;
+    fire('input', box, { isComposing: true });
+    assert.equal(state.query, text);
+    assert.match(main(), new RegExp('SHOP\\[' + text + '\\]'));
+    assert.equal(doc.getElementById('q'), box, 'input replaced mid-composition');
+    assert.equal(doc.activeElement, box, 'focus lost mid-composition');
+    assert.equal(box.selectionStart, text.length);
+    assert.equal(box.selectionEnd, text.length);
+    assert.equal(box.value, text);
+  }
+  assert.equal(doc.listeners.compositionend, undefined, 'no compositionend listener');
 });
 
 test('clearing the search empties the kept input', () => {

@@ -2596,25 +2596,18 @@ document.addEventListener('input', (e) => {
 });
 
 // Live search from the header, on every screen. render() leaves the header
-// (and so this input) in place, so focus and caret survive each keystroke.
-// While an IME is composing a word, wait for compositionend.
-function onSearchInput(box) {
-  state.query = box.value;
+// (and so this input) in place, so focus, caret and IME composition survive
+// each keystroke — results update even mid-composition (Gboard composes
+// almost every Persian word).
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'q') return;
+  state.query = e.target.value;
   if (state.route !== 'shop') {
     state.filter = 'all';
     go('shop');
   } else {
     render();
   }
-}
-
-document.addEventListener('input', (e) => {
-  if (e.target.id !== 'q' || e.isComposing) return;
-  onSearchInput(e.target);
-});
-
-document.addEventListener('compositionend', (e) => {
-  if (e.target.id === 'q') onSearchInput(e.target);
 });
 
 document.addEventListener('keydown', (e) => {
