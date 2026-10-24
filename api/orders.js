@@ -35,7 +35,7 @@ const FREE_SHIP_OVER = 3000000;
 // ⚠ SHIPPING, FREE_SHIP_OVER and DISCOUNT_CODES are also copied in
 // payment-server/src/pricing.js (online payment) and data.js. Change all
 // three together. `npm test` in payment-server/ fails if they differ.
-const DISCOUNT_CODES = { GLOW10: 0.1, HANDMADE15: 0.15 };
+const DISCOUNT_CODES = {}; // none for now — see data.js
 
 const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
 const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩'; // Arabic-Indic — some keyboards/OSes produce these instead of ۰-۹
@@ -306,7 +306,9 @@ module.exports = async (req, res) => {
   }
 
   // ---- Discount ----------------------------------------------------------
-  const code = discount_code && DISCOUNT_CODES[discount_code] ? discount_code : null;
+  // Own keys only, so "constructor" / "__proto__" can't count as a code.
+  const code =
+    typeof discount_code === 'string' && Object.hasOwn(DISCOUNT_CODES, discount_code) ? discount_code : null;
   const rate = code ? DISCOUNT_CODES[code] : 0;
   const discount = Math.round(subtotal * rate);
   const base = subtotal - discount;

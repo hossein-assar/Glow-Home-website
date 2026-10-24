@@ -2337,12 +2337,12 @@ const ACTIONS = {
   'apply-code': () => {
     syncForm();
     const key = state.code.trim().toUpperCase();
-    if (DISCOUNT_CODES[key]) {
+    if (Object.hasOwn(DISCOUNT_CODES, key)) {
       state.appliedCode = key;
       state.codeMsg = 'کد ' + key + ' اعمال شد: ' + FA(Math.round(DISCOUNT_CODES[key] * 100)) + '٪ تخفیف';
     } else {
       state.appliedCode = null;
-      state.codeMsg = 'این کد معتبر نیست. کد نمونه: GLOW10';
+      state.codeMsg = 'این کد معتبر نیست.';
     }
     render();
   },

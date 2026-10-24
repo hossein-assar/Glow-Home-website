@@ -91,7 +91,7 @@ after(() => server && server.close());
 const goodBody = {
   customer: { name: 'سارا', phone: '+989121234567', city: 'تهران', address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' },
   items: [{ cartKey: 'lamp-a', qty: 2, price: 1 }], // client price must be ignored
-  discount_code: 'GLOW10',
+  discount_code: 'GLOW10', // retired: must be ignored
 };
 const checkout = (body = goodBody, headers = {}) =>
   fetch(base + '/api/checkout', {
@@ -112,9 +112,10 @@ test('checkout re-prices, creates pending_payment order, returns StartPay url (R
   assert.equal(res.headers.get('access-control-allow-origin'), 'https://glow-home.ir');
   assert.equal(json.url, 'https://sandbox.zarinpal.com/pg/StartPay/S' + '1'.padStart(35, '0'));
   assert.equal(orders[0].status, 'pending_payment');
-  assert.equal(orders[0].total, 1800000); // 2 × 1,000,000 − 10%, shipping not charged
-  assert.equal(orders[0].payment_amount_rial, 18000000);
-  assert.equal(zp.calls.request[0].amount, 18000000);
+  assert.equal(orders[0].total, 2000000); // 2 × 1,000,000, no discount, shipping not charged
+  assert.equal(orders[0].discount_code, null);
+  assert.equal(orders[0].payment_amount_rial, 20000000);
+  assert.equal(zp.calls.request[0].amount, 20000000);
   assert.equal(zp.calls.request[0].callbackUrl, 'https://pay.example.ir/api/verify');
   assert.equal(orders[0].payment_authority, 'S' + '1'.padStart(35, '0'));
 });
@@ -197,7 +198,7 @@ test('verify OK → paid, then repeated callback is idempotent', async () => {
   assert.equal(orders[0].status, 'paid');
   assert.equal(orders[0].payment_ref_id, '201');
   assert.equal(orders[0].payment_card_pan, '502229******5995');
-  assert.equal(zp.calls.verify[0].amount, 18000000); // stored total, in Rial
+  assert.equal(zp.calls.verify[0].amount, 20000000); // stored total, in Rial
   const paidAt = orders[0].paid_at;
 
   const r2 = await verify(`Authority=${a}&Status=OK`);

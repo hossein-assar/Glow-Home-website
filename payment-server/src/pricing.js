@@ -9,7 +9,7 @@
 //   `npm test` in payment-server/ fails if the three copies drift apart
 //   (test/rules-sync.test.js).
 
-export const DISCOUNT_CODES = { GLOW10: 0.1, HANDMADE15: 0.15 };
+export const DISCOUNT_CODES = {}; // none for now — see data.js
 
 // Both methods are payAtDoor: the courier collects the fee in cash, so it is
 // never part of the amount charged online (same as api/orders.js).
@@ -175,9 +175,10 @@ export function validateCheckoutBody(body) {
  * Re-prices the cart from DB product rows. Never uses a client price.
  * products: rows with { id, slug, name_fa, price, variants, colors, in_stock }.
  * Returns { error } or { orderItems, subtotal, discount, discountCode, total,
- * shippingMethod, shippingCost }.
+ * shippingMethod, shippingCost }. `codes` defaults to DISCOUNT_CODES (tests
+ * pass their own).
  */
-export function priceCart({ items, products, discountCode, city }) {
+export function priceCart({ items, products, discountCode, city, codes = DISCOUNT_CODES }) {
   const bySlug = Object.fromEntries(products.map((p) => [p.slug, p]));
   const orderItems = [];
   let subtotal = 0;
@@ -214,8 +215,8 @@ export function priceCart({ items, products, discountCode, city }) {
   }
 
   // Unknown codes are ignored, same as api/orders.js.
-  const code = discountCode && Object.hasOwn(DISCOUNT_CODES, discountCode) ? discountCode : null;
-  const discount = code ? Math.round(subtotal * DISCOUNT_CODES[code]) : 0;
+  const code = discountCode && Object.hasOwn(codes, discountCode) ? discountCode : null;
+  const discount = code ? Math.round(subtotal * codes[code]) : 0;
   const base = subtotal - discount;
 
   const shippingMethod = shippingMethodForCity(city);

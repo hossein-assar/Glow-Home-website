@@ -305,10 +305,8 @@ const ONLINE_PAYMENT = {
 // data.js (here), api/orders.js, payment-server/src/pricing.js.
 // The same goes for SHIPPING and FREE_SHIP_OVER above. `npm test` in
 // payment-server/ fails if the copies differ.
-const DISCOUNT_CODES = {
-  GLOW10: 0.10,
-  HANDMADE15: 0.15,
-};
+// None for now. To add one, write CODE: rate in all three, e.g. 0.10 = 10% off.
+const DISCOUNT_CODES = {};
 
 /* --------------------------------------------------------------------------
    6. SITE COPY — all drafts, please rewrite in your own voice

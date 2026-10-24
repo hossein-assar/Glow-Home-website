@@ -1,7 +1,10 @@
-# Glow Home — front-end prototype
+# Glow Home
 
-Static site. One responsive page that serves desktop and phone from the same
-code. No build step, no dependencies, no backend.
+Online shop for the Glow Home studio, live at <https://glow-home.ir>. One
+responsive page serves desktop and phone from the same code, with no build
+step. Behind it: Supabase (products, orders, admin login), Vercel functions in
+`api/` (orders, contact form, order tracking), and `payment-server/` for
+ZarinPal online payment.
 
 ## Deploy
 
@@ -20,17 +23,23 @@ for the screen it is on. There is no separate `/mobile` address any more.
 ## Files
 
 ```
-index.html    page shell — rarely needs touching
-data.js       catalog, prices, shipping, discount codes, all site copy
-app.js        screens and behaviour
-styles.css    design tokens and components
-images/       product photos, named after product ids (see images/README.txt)
-fonts/        Farhang + IRANSansX + Marcellus, self-hosted
+index.html      page shell — rarely needs touching
+data.js         site copy, shipping, discount codes, fallback catalog
+app.js          screens and behaviour
+styles.css      design tokens and components
+admin/          admin panel (products, prices, photos, orders)
+api/            Vercel functions: orders, contact, track-order, pay-callback
+payment-server/ ZarinPal payment server (runs on the Iranian VPS) + all tests
+supabase/       schema and migrations, run by hand in the SQL Editor
+images/         site images and fallback product photos (see images/README.txt)
+fonts/          Farhang + IRANSansX + Marcellus, self-hosted
 ```
 
-**`data.js` is the only file you need for day-to-day changes.** Prices, stock,
-copy and new products all live there, and both layouts read from it, so there
-is nothing to keep in sync.
+**Products, prices, stock and photos are edited in the admin panel**
+(`/admin`), which writes to Supabase. The storefront shows the catalog in
+`data.js` first and swaps in the live one as soon as it loads, so `data.js`
+is only a fallback for products. Site copy, shipping and discount codes do
+live in `data.js`.
 
 ## What it does
 
@@ -65,26 +74,24 @@ darkened), and `images/logo-full-light.png` (the complete lockup with
 wordmark, used in the footer). All three are transparent PNGs recoloured
 from the studio's original artwork — keep them as PNG, not jpg.
 
-## Before this can take real orders
+## Prices
 
-1. **Confirm the seven photo matches above**, then finish photographing the
-   remaining 15 pieces. See `images/README.txt` for the naming.
-2. **Real prices.** Everything in `PRICE` is a placeholder. Replace the block,
-   then set `PRICES_ARE_PROVISIONAL = false` to drop the «موقت» flags and the
-   warning bar.
-3. **Copy review.** Product descriptions, the about story and the FAQ answers
-   in `data.js` are drafts written from the catalog specs, not the studio's own
-   words.
-4. **A backend.** Payment gateway, inventory and order storage. Nothing here
-   presumes a particular platform.
+Real prices are set per product in the admin panel; the server always
+re-prices an order from the database. «موقت» flags are per product (the
+admin panel's «قیمت موقت» checkbox). `PRICE` and `PRICES_ARE_PROVISIONAL` in
+`data.js` only feed the fallback catalog shown before the live one loads.
 
-## Demo values
+## Checkout rules
 
-- Discount codes: `GLOW10` (۱۰٪), `HANDMADE15` (۱۵٪)
-- Free shipping over ۳٬۰۰۰٬۰۰۰ تومان
-- Shipping: پست پیشتاز ۶۵٬۰۰۰ · پیک تهران ۹۰٬۰۰۰ · تیپاکس پس‌کرایه
-- Out of stock: حبابی، پیرکس U — their button routes to تماس with the piece
-  name filled into the message
+- Discount codes: none for now. `DISCOUNT_CODES` is hand-copied in `data.js`,
+  `api/orders.js` and `payment-server/src/pricing.js`; to add a code, add it
+  to all three (`npm test` in `payment-server/` fails if they differ).
+- Shipping is set by the city: پیک تهران for Tehran, تیپاکس elsewhere. Both
+  are پس‌کرایه — the customer pays the courier on delivery, so shipping is
+  never part of the charged total.
+- Payment: درگاه پرداخت آنلاین (ZarinPal) or کارت به کارت.
+- Out-of-stock products (set in the admin panel): their button routes to
+  تماس with the piece name filled into the message.
 
 ## Fonts
 
@@ -129,20 +136,7 @@ eleven weights each, so everything is already available to you.
 
 ## Adding a product
 
-Two entries in `data.js`, plus the photo:
-
-```js
-// in PRICE
-bahar: 2400000,
-
-// in PRODUCTS
-{
-  id: 'bahar', fa: 'بهار', en: 'Bahar', col: 'lamps',
-  height: 45, material: 'clay',
-  desc: 'یک یا دو جمله درباره‌ی این قطعه.',
-},
-```
-
-Then save `images/bahar.png`. It appears in the shop, its collection, search
-and the related-products strip automatically. If you forget the price the
-console warns you and the piece shows as ۰ تومان rather than breaking.
+Add it in the admin panel (`/admin`): name, slug, collection, price (and
+sizes / shade prices if it has them), then upload its photo there. It
+appears in the shop, its collection, search and the related-products strip
+as soon as it is saved. `data.js` does not need to change.

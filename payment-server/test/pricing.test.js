@@ -42,6 +42,7 @@ test('prices from DB with variant, color, discount; shipping never charged', () 
     products,
     discountCode: 'HANDMADE15',
     city: 'تهران',
+    codes: { HANDMADE15: 0.15 }, // the feature still works once a code is added
   });
   assert.equal(r.subtotal, 1500000 * 2 + 1000000);
   assert.equal(r.discount, Math.round(4000000 * 0.15));
@@ -52,7 +53,7 @@ test('prices from DB with variant, color, discount; shipping never charged', () 
 });
 
 test('unknown / prototype discount codes are ignored', () => {
-  for (const code of ['NOPE', 'constructor', '__proto__']) {
+  for (const code of ['NOPE', 'constructor', '__proto__', 'GLOW10', 'HANDMADE15']) {
     const r = priceCart({ items: [{ cartKey: 'lamp-a', qty: 1 }], products, discountCode: code, city: 'شیراز' });
     assert.equal(r.total, 1000000);
     assert.equal(r.discountCode, null);
