@@ -46,10 +46,11 @@ decisions from code alone — read this before making structural changes.
   message asking for English digits instead, because the phone input
   doubles as the canonical stored value — see the gotcha below, this
   inconsistency with postcode is deliberate. Applied consistently across
-  checkout, the contact form, and `/track`, though the contact form and
-  `/track` keep their own looser length-based format check beyond the
-  digit-rejection (contact may legitimately be a landline; `/track` only
-  needs to match an already-valid stored phone).
+  checkout, the contact form, and `/track`. The contact form requires an
+  Iranian mobile (any common shape, normalized to `09XXXXXXXXX` by
+  `contactMobile()` in app.js / `normalizeMobile()` in `api/contact.js`);
+  `/track` keeps its own looser length-based check beyond the
+  digit-rejection (it only needs to match an already-valid stored phone).
 - **Checkout errors are inline, per-field, and live**: نام, شماره موبایل,
   شهر, نشانی and کد پستی each show their own error message directly under
   that field (`.field-error`, a true red — `--color-red-700` — chosen
@@ -106,6 +107,14 @@ decisions from code alone — read this before making structural changes.
   code. If either is missing, the notification step silently no-ops rather
   than breaking checkout; a failed send (bad key, Resend outage, etc.) is
   caught and logged with `console.error` but never surfaces to the customer.
+- **Contact form**: `/api/contact.js` emails the shop through the same
+  Resend call, env vars, sender and recipient (`ORDER_NOTIFY_EMAIL`), subject
+  «پیام جدید از فرم تماس». Unlike the order email, a missing key or failed
+  send returns a generic error to the page (the email is the whole job, so
+  it must not pretend to succeed). Origin must be exactly
+  `https://glow-home.ir` (www redirects there; Vercel preview URLs are
+  refused), hidden honeypot field `website`, per-IP rate limit (in memory,
+  per warm instance — a brake, not a guarantee), every value HTML-escaped.
 - **Order tracking**: `/track` + `/api/track-order.js`. Requires BOTH the
   order code and the phone used at checkout to match — order codes are
   sequential and easily guessable, so code alone must never be enough;

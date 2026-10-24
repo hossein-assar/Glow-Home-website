@@ -344,9 +344,10 @@ const state = {
   trackError: '',
   trackData: null, // { code, status, items, total, createdAt } from a matched lookup
   paymentResult: null, // { code, ok } for the informational #/payment/<code>/<ok|failed> page
-  contact: { name: '', phone: '', msg: '' },
+  contact: { name: '', phone: '', msg: '', website: '' }, // website = hidden honeypot field
   contactSent: false,
   contactError: '',
+  contactSending: false, // true while /api/contact is in flight
   menuOpen: false,
   menuCategoryOpen: null, // which nav-menu category (if any) has its subcategories expanded — click-toggled, not hover
   lightbox: null, // { id, index } while the full-screen photo popup is open
@@ -1856,6 +1857,18 @@ function screenFaq() {
   </div>`;
 }
 
+/** Same limits and mobile rule as api/contact.js (which re-checks everything). */
+const CONTACT_NAME_MAX = 100;
+const CONTACT_MSG_MIN = 5;
+const CONTACT_MSG_MAX = 2000;
+
+/** Iranian mobile in any common shape (09…, +989…, 989…, 9…) → 09XXXXXXXXX, or null. */
+function contactMobile(raw) {
+  const v = String(raw ?? '').replace(/[\s-]/g, '');
+  const m = v.match(/^(?:\+98|0098|98|0)?(9[0-9]{9})$/);
+  return m ? '0' + m[1] : null;
+}
+
 function screenContact() {
   const c = state.contact;
   if (state.contactSent) {
@@ -1863,10 +1876,9 @@ function screenContact() {
     <div class="shell-narrow screen">
       <div class="done">
         <div class="done-mark">${icon('check')}</div>
-        <h1 class="page-title">پیام شما ثبت شد</h1>
-        <p class="lead" style="margin:12px auto 0">معمولاً ظرف یک روز کاری پاسخ می‌دهیم.</p>
+        <h1 class="page-title">پیام شما ارسال شد</h1>
+        <p class="lead" style="margin:12px auto 0">پیام‌تان به دست ما رسید. معمولاً ظرف یک روز کاری پاسخ می‌دهیم.</p>
       </div>
-      <div class="alert alert-info" style="margin-top:22px">نسخه‌ی نمایشی: پیام واقعاً ارسال نشد.</div>
       <div style="display:flex;gap:12px;margin-top:22px;flex-wrap:wrap">
         <button class="btn btn-primary" data-nav="#/shop">بازگشت به فروشگاه</button>
         <button class="btn btn-ghost" data-act="contact-reset">نوشتن پیام دیگر</button>
@@ -1886,16 +1898,22 @@ function screenContact() {
         <input class="input" id="c-name" value="${esc(c.name)}" autocomplete="name">
       </div>
       <div class="field">
-        <label for="c-phone">شماره تماس</label>
-        <input class="input ltr" id="c-phone" inputmode="tel" value="${esc(c.phone)}" autocomplete="tel">
+        <label for="c-phone">شماره موبایل</label>
+        <input class="input ltr" id="c-phone" inputmode="tel" value="${esc(c.phone)}" autocomplete="tel" placeholder="09121234567">
       </div>
       <div class="field span-2">
         <label for="c-msg">پیام</label>
-        <textarea class="input" id="c-msg">${esc(c.msg)}</textarea>
+        <textarea class="input" id="c-msg" maxlength="${CONTACT_MSG_MAX}">${esc(c.msg)}</textarea>
+      </div>
+      <div aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden">
+        <label for="c-website">وب‌سایت</label>
+        <input id="c-website" tabindex="-1" autocomplete="off" value="${esc(c.website)}">
       </div>
     </div>
     ${state.contactError ? `<div class="alert alert-error">${esc(state.contactError)}</div>` : ''}
-    <button class="btn btn-accent" style="margin-top:18px" data-act="send-contact">ارسال پیام</button>
+    <button class="btn btn-accent" style="margin-top:18px" data-act="send-contact" ${state.contactSending ? 'disabled' : ''}>${
+      state.contactSending ? 'در حال ارسال...' : 'ارسال پیام'
+    }</button>
 
     <div class="panel" style="margin-top:30px">
       <div style="display:flex;align-items:center;gap:12px">
@@ -2044,7 +2062,7 @@ function syncForm() {
     if (otp) state.otp = otp.value;
   }
   if (state.route === 'contact') {
-    const map = { 'c-name': 'name', 'c-phone': 'phone', 'c-msg': 'msg' };
+    const map = { 'c-name': 'name', 'c-phone': 'phone', 'c-msg': 'msg', 'c-website': 'website' };
     Object.entries(map).forEach(([id, k]) => {
       const el = document.getElementById(id);
       if (el) state.contact[k] = el.value;
@@ -2362,27 +2380,44 @@ const ACTIONS = {
   },
 
   'send-contact': () => {
+    if (state.contactSending) return;
     syncForm();
-    if (!state.contact.name.trim()) {
-      state.contactError = 'نام را وارد کنید.';
-      return render();
-    }
-    if (containsPersianOrArabicDigits(state.contact.phone)) {
-      state.contactError = 'لطفاً شماره تماس را با اعداد انگلیسی وارد کنید.';
-      return render();
-    }
-    if (state.contact.phone.replace(/\D/g, '').length < 10) {
-      state.contactError = 'شماره تماس را کامل وارد کنید.';
-      return render();
-    }
+    const c = state.contact;
+    const fail = (msg) => {
+      state.contactError = msg;
+      state.contactSending = false;
+      render();
+    };
+    if (!c.name.trim()) return fail('نام را وارد کنید.');
+    if (c.name.trim().length > CONTACT_NAME_MAX) return fail('نام بیش از حد طولانی است.');
+    if (!c.phone.trim()) return fail('شماره موبایل را وارد کنید.');
+    if (containsPersianOrArabicDigits(c.phone)) return fail('لطفاً شماره موبایل را با اعداد انگلیسی وارد کنید.');
+    if (!contactMobile(c.phone)) return fail('شماره موبایل معتبر نیست (مثلاً 09121234567).');
+    if (c.msg.trim().length < CONTACT_MSG_MIN) return fail('متن پیام را بنویسید.');
+    if (c.msg.trim().length > CONTACT_MSG_MAX) return fail(`پیام نباید بیشتر از ${CONTACT_MSG_MAX} نویسه باشد.`);
+
     state.contactError = '';
-    state.contactSent = true;
+    state.contactSending = true;
     render();
+
+    fetch('/api/contact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: c.name, phone: c.phone, message: c.msg, website: c.website }),
+    })
+      .then((r) => r.json())
+      .then((res) => {
+        if (!res.ok) return fail(res.error || 'ارسال پیام با خطا مواجه شد. لطفاً دوباره تلاش کنید.');
+        state.contactSending = false;
+        state.contactSent = true;
+        render();
+      })
+      .catch(() => fail('اتصال برقرار نشد. اینترنت خود را بررسی کنید و دوباره تلاش کنید.'));
   },
 
   'contact-reset': () => {
     state.contactSent = false;
-    state.contact = { name: '', phone: '', msg: '' };
+    state.contact = { name: '', phone: '', msg: '', website: '' };
     render();
   },
 
