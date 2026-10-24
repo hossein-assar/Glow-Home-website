@@ -857,8 +857,7 @@ function header() {
         <div class="header-search">
           <div class="search-box">
             ${icon('search', 'icon icon-sm')}
-            <input id="q" type="search" placeholder="جست‌وجو در محصولات" value="${esc(state.query)}"
-                   aria-label="جست‌وجو در محصولات">
+            <input id="q" type="search" placeholder="جست‌وجو در محصولات" aria-label="جست‌وجو در محصولات">
           </div>
         </div>
       </div>
@@ -2026,11 +2025,42 @@ const TITLES = {
   payment: 'نتیجه‌ی پرداخت — Glow Home',
 };
 
+/** header() output from the last render. The search box's value is set on
+ * the element (not in this HTML), so typing never changes it. */
+let lastChrome = '';
+
 function render() {
   const body = (SCREENS[state.route] || screenHome)();
   document.title = TITLES[state.route] || TITLES.home;
 
-  $('#app').innerHTML = header() + '<main>' + body + '</main>' + footer() + tabbar() + renderLightbox();
+  const chrome = header();
+  const rest = '<main>' + body + '</main>' + footer() + tabbar() + renderLightbox();
+  const app = $('#app');
+  const head = $('#app > header');
+  const box = document.getElementById('q');
+  if (head && box && chrome === lastChrome) {
+    // Header unchanged: leave it — and the search input — in place, so the
+    // input keeps focus, caret and any IME composition while typing.
+    while (head.nextSibling) head.nextSibling.remove();
+    head.insertAdjacentHTML('afterend', rest);
+    if (box.value !== state.query) box.value = state.query;
+  } else {
+    // The header itself changed (cart badge, menu): rebuild everything, and
+    // put focus and caret back if the search box had them.
+    const focused = box && document.activeElement === box;
+    const start = focused ? box.selectionStart : null;
+    const end = focused ? box.selectionEnd : null;
+    app.innerHTML = chrome + rest;
+    const fresh = document.getElementById('q');
+    if (fresh) {
+      fresh.value = state.query;
+      if (focused) {
+        fresh.focus();
+        if (start !== null) fresh.setSelectionRange(start, end);
+      }
+    }
+  }
+  lastChrome = chrome;
 
   document.body.classList.toggle('has-action-bar', !!$('.action-bar'));
   hydrateMedia();
@@ -2565,21 +2595,26 @@ document.addEventListener('input', (e) => {
   }
 });
 
-// Live search from the header, on every screen.
-document.addEventListener('input', (e) => {
-  if (e.target.id !== 'q') return;
-  state.query = e.target.value;
+// Live search from the header, on every screen. render() leaves the header
+// (and so this input) in place, so focus and caret survive each keystroke.
+// While an IME is composing a word, wait for compositionend.
+function onSearchInput(box) {
+  state.query = box.value;
   if (state.route !== 'shop') {
     state.filter = 'all';
     go('shop');
   } else {
     render();
   }
-  const box = document.getElementById('q');
-  if (box) {
-    box.focus();
-    box.setSelectionRange(box.value.length, box.value.length);
-  }
+}
+
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'q' || e.isComposing) return;
+  onSearchInput(e.target);
+});
+
+document.addEventListener('compositionend', (e) => {
+  if (e.target.id === 'q') onSearchInput(e.target);
 });
 
 document.addEventListener('keydown', (e) => {
