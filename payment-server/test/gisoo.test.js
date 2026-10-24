@@ -132,10 +132,12 @@ test('products without shade types behave exactly as before', () => {
   assert.equal(orders.hasShadeTypes(lampA), false);
 });
 
-test('shade type labels match in api/orders.js and app.js', () => {
+test('shade type labels match in api/orders.js, app.js and admin/admin.js', () => {
   assert.deepEqual(orders.SHADE_TYPES, SHADE_TYPES);
-  const block = read('../../app.js').match(/const SHADE_TYPES = \{([^}]*)\}/);
-  assert.ok(block, 'SHADE_TYPES not found in app.js');
-  const appTypes = Object.fromEntries([...block[1].matchAll(/(\w+):\s*'([^']*)'/g)].map((m) => [m[1], m[2]]));
-  assert.deepEqual(appTypes, SHADE_TYPES);
+  for (const file of ['../../app.js', '../../admin/admin.js']) {
+    const block = read(file).match(/const SHADE_TYPES = \{([^}]*)\}/);
+    assert.ok(block, 'SHADE_TYPES not found in ' + file);
+    const types = Object.fromEntries([...block[1].matchAll(/(\w+):\s*'([^']*)'/g)].map((m) => [m[1], m[2]]));
+    assert.deepEqual(types, SHADE_TYPES, file);
+  }
 });

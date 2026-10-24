@@ -166,10 +166,13 @@ correctly-priced cart lines. `/api/orders.js` re-parses this same key format
 server-side to resolve authoritative prices — if you change this format,
 update both sides.
 
-A product whose `variants` entries carry a `shades` map (only گیسو, see
-`supabase/migration-gisoo-shades.sql`) is also priced by shade type:
+A product whose `variants` entries carry a `shades` map (گیسو: plain /
+embroidered, دفرمه: plain / macrame — see `supabase/migration-*-shades.sql`)
+is also priced by shade type:
 `{"height":140,"price":<plain>,"shades":{"plain":…,"embroidered":…}}`, cart
-key `gisoo::h140::splain` / `::sembroidered`. Such a product is priced
+key `gisoo::h140::splain` / `::sembroidered`. A size accepts only the keys in
+its own `shades` map; labels are `SHADE_TYPES`, copied in app.js,
+admin/admin.js, api/orders.js and payment-server. Such a product is priced
 strictly on both servers — a key without a stored height + shade (e.g. an
 old `gisoo::h100`) is rejected, not guessed; the storefront drops those
 stale lines from the cart once the live catalog loads.

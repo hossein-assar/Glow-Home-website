@@ -117,12 +117,13 @@ function parseCartKey(key) {
   return { id, height, colorIndex, shade };
 }
 
-// Shade types a size can be priced by (only گیسو so far). The prices live in
-// the DB on each variant: {"height": 140, "price": …, "shades": {"plain": …,
-// "embroidered": …}} — the client only names which one it wants.
+// Shade types a size can be priced by (گیسو, دفرمه). The prices live in the
+// DB on each variant: {"height": 140, "price": …, "shades": {"plain": …,
+// "embroidered": …}} — the client only names which one it wants, and a size
+// accepts only the keys stored in its own `shades` map.
 // ⚠ Same as SHADE_TYPES/shadeLine in payment-server/src/pricing.js and the
 // labels in app.js; `npm test` in payment-server/ checks this copy too.
-const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوزی' };
+const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوزی', macrame: 'شید مکرومه' };
 
 function hasShadeTypes(p) {
   return Array.isArray(p.variants) && p.variants.some((v) => v && v.shades && typeof v.shades === 'object');

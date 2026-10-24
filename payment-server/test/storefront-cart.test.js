@@ -27,6 +27,19 @@ const gisoo = {
     { height: 100, price: 9100000, shades: { plain: 9100000, embroidered: 11600000 } },
   ],
 };
+const deforme = {
+  id: 'deforme',
+  height: 100,
+  heightFa: '۱۰۰ سانتی‌متر',
+  materialFa: 'سفال',
+  price: 9400000,
+  colors: [],
+  variants: [
+    { height: 140, price: 13100000, shades: { plain: 13100000, macrame: 13500000 } },
+    { height: 120, price: 10100000, shades: { plain: 10100000, macrame: 10500000 } },
+    { height: 100, price: 9400000, shades: { plain: 9400000, macrame: 9800000 } },
+  ],
+};
 const lale = { id: 'lale', height: 40, heightFa: '۴۰', materialFa: 'سفال', price: 6500000, colors: [], variants: [] };
 
 function storefront(catalog) {
@@ -68,6 +81,31 @@ test('addToCart refuses any gisoo key the cart cannot price', () => {
   assert.deepEqual(sf.state.cart, {});
   assert.equal(sf.addToCart('gisoo::h140::sembroidered', 2), true);
   assert.deepEqual(sf.state.cart, { 'gisoo::h140::sembroidered': 2 });
+});
+
+test('a deforme product card adds the base height with the plain shade', () => {
+  const sf = storefront([gisoo, deforme, lale]);
+  assert.equal(sf.cardCartKey(deforme), 'deforme::h100::splain');
+  assert.equal(sf.addToCart(sf.cardCartKey(deforme)), true);
+  assert.deepEqual(sf.state.cart, { 'deforme::h100::splain': 1 });
+  assert.equal(sf.cartLineData('deforme::h100::splain').price, 9400000);
+  assert.equal(sf.cartLineData('deforme::h140::smacrame').price, 13500000);
+  assert.equal(sf.cartLineData('deforme::h140::smacrame').shadeFa, 'شید مکرومه');
+});
+
+test('each product only accepts its own shade types in the cart', () => {
+  const sf = storefront([gisoo, deforme]);
+  for (const key of ['deforme::h100::sembroidered', 'gisoo::h100::smacrame', 'deforme::h60', 'deforme::h80::splain', 'deforme::h130::smacrame']) {
+    assert.equal(sf.addToCart(key), false, key);
+  }
+  assert.deepEqual(sf.state.cart, {});
+});
+
+test('the product page shade picker lists only the stored shade types, plain by default', () => {
+  // The picker filters SHADE_TYPES by the chosen size's own shades map.
+  assert.match(src, /Object\.entries\(SHADE_TYPES\)\s*\.filter\(\(\[key\]\) => Object\.hasOwn\(effectiveVariant\.shades, key\)\)/);
+  assert.match(src, /selectedShade: 'plain',/);
+  assert.match(src, /state\.selectedShade = 'plain';/);
 });
 
 test('other products are added exactly as before', () => {

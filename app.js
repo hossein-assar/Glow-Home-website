@@ -352,7 +352,7 @@ const state = {
   lightbox: null, // { id, index } while the full-screen photo popup is open
   selectedHeight: null, // chosen size on a product page with variants
   selectedColorIndex: 0, // chosen color on a product page with colors
-  selectedShade: 'plain', // chosen shade type on a product page with shade types (گیسو)
+  selectedShade: 'plain', // chosen shade type on a product page with shade types (گیسو, دفرمه)
   placingOrder: false, // true while /api/orders is in flight
 };
 
@@ -366,7 +366,7 @@ function cartCount() {
  * and/or color choices, the slug plus "::h<height>" and/or "::c<colorIndex>"
  * so two different sizes/colors of the same product sit in the cart as
  * distinct, correctly-labelled lines instead of colliding. A product with
- * shade types (گیسو) also gets "::s<shade>", e.g. "gisoo::h140::splain". */
+ * shade types (گیسو, دفرمه) also gets "::s<shade>", e.g. "gisoo::h140::splain". */
 function parseCartKey(key) {
   const parts = key.split('::');
   const id = parts[0];
@@ -382,9 +382,10 @@ function parseCartKey(key) {
 }
 
 /** Shade types a size can be priced by. Prices come from the DB, stored on
- * each variant as {height, price, shades: {plain, embroidered}}; `price` is
+ * each variant as {height, price, shades: {plain, embroidered | macrame}};
+ * a size offers only the keys in its own `shades` map, and `price` is
  * the plain price. Same labels in api/orders.js and payment-server. */
-const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوزی' };
+const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوزی', macrame: 'شید مکرومه' };
 
 function hasShadeTypes(p) {
   return !!(p.variants && p.variants.some((v) => v && v.shades && typeof v.shades === 'object'));

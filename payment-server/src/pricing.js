@@ -80,10 +80,11 @@ export function parseCartKey(key) {
   return { id, height, colorIndex, shade };
 }
 
-// Shade types a size can be priced by (only گیسو so far). Prices live in the
-// DB on each variant: {"height": 140, "price": …, "shades": {"plain": …,
-// "embroidered": …}}. Same labels in api/orders.js and app.js.
-export const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوزی' };
+// Shade types a size can be priced by (گیسو, دفرمه). Prices live in the DB
+// on each variant: {"height": 140, "price": …, "shades": {"plain": …,
+// "embroidered": …}}. A size accepts only the keys stored in its own
+// `shades` map. Same labels in api/orders.js, app.js and admin/admin.js.
+export const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوزی', macrame: 'شید مکرومه' };
 
 export function hasShadeTypes(p) {
   return Array.isArray(p.variants) && p.variants.some((v) => v && v.shades && typeof v.shades === 'object');

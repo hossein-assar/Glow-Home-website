@@ -101,15 +101,23 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
    size variants). Colors are a plain comma-separated list. Variants are a
    small repeatable height+price list, stored as the same [{height,price}]
    shape the storefront's size picker already reads. A product whose sizes
-   are also priced by shade type (گیسو, see supabase/migration-gisoo-shades.sql)
-   gets a plain + embroidered price per size instead, stored as
-   {height, price: <plain>, shades: {plain, embroidered}}. */
+   are also priced by shade type (گیسو, دفرمه — see supabase/migration-*-shades.sql)
+   gets one price per shade type found in its data instead, stored as
+   {height, price: <plain>, shades: {plain, embroidered | macrame}}. */
 
 const COLLECTION_LABEL = { lamps: 'آباژور', shades: 'شید', candles: 'شمع', decor: 'اکسسوری منزل' };
 const STYLE_OPTIONS = ['', 'رومیزی', 'کنار سالنی'];
 
 const hasShadeTypes = (p) =>
   Array.isArray(p.variants) && p.variants.some((v) => v && v.shades && typeof v.shades === 'object');
+
+// Same labels as SHADE_TYPES in app.js, api/orders.js and payment-server.
+const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوزی', macrame: 'شید مکرومه' };
+
+// The shade types a product's sizes are priced by, in SHADE_TYPES order
+// (plain first): gisoo → plain, embroidered; deforme → plain, macrame.
+const shadeKeysOf = (p) =>
+  Object.keys(SHADE_TYPES).filter((k) => p.variants.some((v) => v && v.shades && Object.hasOwn(v.shades, k)));
 
 let PRODUCTS_CACHE = [];
 let productSearchTerm = '';
@@ -200,7 +208,7 @@ function rowHtml(p) {
 
 function editPanelHtml(p) {
   const variants = Array.isArray(p.variants) ? p.variants : [];
-  const shades = hasShadeTypes(p);
+  const shadeKeys = hasShadeTypes(p) ? shadeKeysOf(p) : null;
   const colors = Array.isArray(p.colors) ? p.colors.join('، ') : '';
   return `
     <tr class="edit-row" id="edit-row-${p.id}">
@@ -251,13 +259,13 @@ function editPanelHtml(p) {
         </div>
         <div style="margin-top:14px">
           <label>${
-            shades
-              ? 'اندازه‌ها و قیمت هر اندازه برای شید ساده و شید گلدوزی (تومان)'
+            shadeKeys
+              ? 'اندازه‌ها و قیمت هر اندازه برای ' + shadeKeys.map((k) => SHADE_TYPES[k]).join(' و ') + ' (تومان)'
               : 'اندازه‌ها و قیمت هر اندازه (در صورت وجود چند سایز)'
           }</label>
           <div id="variants-list-${p.id}">
             ${variants
-              .map((v, i) => (shades ? shadeVariantRowHtml(i, v) : variantRowHtml(p.id, i, v.height, v.price)))
+              .map((v, i) => (shadeKeys ? shadeVariantRowHtml(i, shadeKeys, v) : variantRowHtml(p.id, i, v.height, v.price)))
               .join('')}
           </div>
           <button class="link-btn" id="add-variant-${p.id}">+ افزودن اندازه</button>
@@ -279,13 +287,17 @@ function variantRowHtml(pid, i, height, price) {
     </div>`;
 }
 
-function shadeVariantRowHtml(i, v = {}) {
+function shadeVariantRowHtml(i, shadeKeys, v = {}) {
   const sh = v.shades || {};
   return `
     <div class="variant-row" data-idx="${i}">
       <input type="number" placeholder="ارتفاع (سانتی‌متر)" class="v-height" value="${v.height ?? ''}">
-      <input type="number" placeholder="قیمت شید ساده (تومان)" class="v-price-plain" value="${sh.plain ?? ''}">
-      <input type="number" placeholder="قیمت شید گلدوزی (تومان)" class="v-price-embroidered" value="${sh.embroidered ?? ''}">
+      ${shadeKeys
+        .map(
+          (k) =>
+            `<input type="number" placeholder="قیمت ${SHADE_TYPES[k]} (تومان)" class="v-shade-price" data-shade="${k}" value="${sh[k] ?? ''}">`
+        )
+        .join('')}
       <button class="btn ghost remove-variant" type="button">حذف</button>
     </div>`;
 }
@@ -308,7 +320,10 @@ function toggleEdit(id) {
   document.getElementById(`add-variant-${id}`).addEventListener('click', () => {
     const list = document.getElementById(`variants-list-${id}`);
     const idx = list.children.length;
-    list.insertAdjacentHTML('beforeend', hasShadeTypes(p) ? shadeVariantRowHtml(idx) : variantRowHtml(id, idx, '', ''));
+    list.insertAdjacentHTML(
+      'beforeend',
+      hasShadeTypes(p) ? shadeVariantRowHtml(idx, shadeKeysOf(p)) : variantRowHtml(id, idx, '', '')
+    );
     wireVariantRemove(list);
   });
   wireVariantRemove(document.getElementById(`variants-list-${id}`));
@@ -363,19 +378,21 @@ async function saveProductFull(id) {
   const variants = [];
   let basePrice = null;
   if (cachedRow && hasShadeTypes(cachedRow)) {
-    // Every size needs both prices — a half-filled row is an error, not
-    // silently dropped, because the server rejects unknown sizes.
+    // Every size needs every shade price — a half-filled row is an error,
+    // not silently dropped, because the server rejects unknown sizes.
     const isPrice = (n) => Number.isSafeInteger(n) && n > 0;
+    const shadeKeys = shadeKeysOf(cachedRow);
     for (const row of variantRows) {
       const h = Number(row.querySelector('.v-height').value);
-      const plain = Number(row.querySelector('.v-price-plain').value);
-      const embroidered = Number(row.querySelector('.v-price-embroidered').value);
-      if (!isPrice(h) || !isPrice(plain) || !isPrice(embroidered) || variants.some((v) => v.height === h)) {
-        msg.textContent = 'خطا: برای هر اندازه، ارتفاع (تکراری نباشد) و هر دو قیمت شید را وارد کنید.';
+      const shades = {};
+      for (const input of row.querySelectorAll('.v-shade-price')) shades[input.dataset.shade] = Number(input.value);
+      const complete = shadeKeys.every((k) => isPrice(shades[k]));
+      if (!isPrice(h) || !complete || variants.some((v) => v.height === h)) {
+        msg.textContent = 'خطا: برای هر اندازه، ارتفاع (تکراری نباشد) و همه‌ی قیمت‌های شید را وارد کنید.';
         msg.className = 'msg error';
         return;
       }
-      variants.push({ height: h, price: plain, shades: { plain, embroidered } });
+      variants.push({ height: h, price: shades.plain ?? shades[shadeKeys[0]], shades });
     }
     // The card and its "افزودن به سبد" use the base size, so it must be one
     // of the sizes; the base price follows that size's plain price.
