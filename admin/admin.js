@@ -100,10 +100,16 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
    other field (subcategory, style, material, height, description, colors,
    size variants). Colors are a plain comma-separated list. Variants are a
    small repeatable height+price list, stored as the same [{height,price}]
-   shape the storefront's size picker already reads. */
+   shape the storefront's size picker already reads. A product whose sizes
+   are also priced by shade type (گیسو, see supabase/migration-gisoo-shades.sql)
+   gets a plain + embroidered price per size instead, stored as
+   {height, price: <plain>, shades: {plain, embroidered}}. */
 
 const COLLECTION_LABEL = { lamps: 'آباژور', shades: 'شید', candles: 'شمع', decor: 'اکسسوری منزل' };
 const STYLE_OPTIONS = ['', 'رومیزی', 'کنار سالنی'];
+
+const hasShadeTypes = (p) =>
+  Array.isArray(p.variants) && p.variants.some((v) => v && v.shades && typeof v.shades === 'object');
 
 let PRODUCTS_CACHE = [];
 let productSearchTerm = '';
@@ -194,6 +200,7 @@ function rowHtml(p) {
 
 function editPanelHtml(p) {
   const variants = Array.isArray(p.variants) ? p.variants : [];
+  const shades = hasShadeTypes(p);
   const colors = Array.isArray(p.colors) ? p.colors.join('، ') : '';
   return `
     <tr class="edit-row" id="edit-row-${p.id}">
@@ -243,9 +250,15 @@ function editPanelHtml(p) {
           </div>
         </div>
         <div style="margin-top:14px">
-          <label>اندازه‌ها و قیمت هر اندازه (در صورت وجود چند سایز)</label>
+          <label>${
+            shades
+              ? 'اندازه‌ها و قیمت هر اندازه برای شید ساده و شید گلدوزی (تومان)'
+              : 'اندازه‌ها و قیمت هر اندازه (در صورت وجود چند سایز)'
+          }</label>
           <div id="variants-list-${p.id}">
-            ${variants.map((v, i) => variantRowHtml(p.id, i, v.height, v.price)).join('')}
+            ${variants
+              .map((v, i) => (shades ? shadeVariantRowHtml(i, v) : variantRowHtml(p.id, i, v.height, v.price)))
+              .join('')}
           </div>
           <button class="link-btn" id="add-variant-${p.id}">+ افزودن اندازه</button>
         </div>
@@ -262,6 +275,17 @@ function variantRowHtml(pid, i, height, price) {
     <div class="variant-row" data-idx="${i}">
       <input type="number" placeholder="ارتفاع (سانتی‌متر)" class="v-height" value="${height ?? ''}">
       <input type="number" placeholder="قیمت (تومان)" class="v-price" value="${price ?? ''}">
+      <button class="btn ghost remove-variant" type="button">حذف</button>
+    </div>`;
+}
+
+function shadeVariantRowHtml(i, v = {}) {
+  const sh = v.shades || {};
+  return `
+    <div class="variant-row" data-idx="${i}">
+      <input type="number" placeholder="ارتفاع (سانتی‌متر)" class="v-height" value="${v.height ?? ''}">
+      <input type="number" placeholder="قیمت شید ساده (تومان)" class="v-price-plain" value="${sh.plain ?? ''}">
+      <input type="number" placeholder="قیمت شید گلدوزی (تومان)" class="v-price-embroidered" value="${sh.embroidered ?? ''}">
       <button class="btn ghost remove-variant" type="button">حذف</button>
     </div>`;
 }
@@ -284,7 +308,7 @@ function toggleEdit(id) {
   document.getElementById(`add-variant-${id}`).addEventListener('click', () => {
     const list = document.getElementById(`variants-list-${id}`);
     const idx = list.children.length;
-    list.insertAdjacentHTML('beforeend', variantRowHtml(id, idx, '', ''));
+    list.insertAdjacentHTML('beforeend', hasShadeTypes(p) ? shadeVariantRowHtml(idx) : variantRowHtml(id, idx, '', ''));
     wireVariantRemove(list);
   });
   wireVariantRemove(document.getElementById(`variants-list-${id}`));
@@ -334,20 +358,48 @@ async function saveProductFull(id) {
     ? colorsRaw.split(/[,،]/).map((s) => s.trim()).filter(Boolean)
     : [];
 
+  const cachedRow = PRODUCTS_CACHE.find((x) => x.id === id);
   const variantRows = document.querySelectorAll(`#variants-list-${id} .variant-row`);
   const variants = [];
-  for (const row of variantRows) {
-    const h = row.querySelector('.v-height').value;
-    const pr = row.querySelector('.v-price').value;
-    if (h === '' || pr === '') continue;
-    variants.push({ height: Number(h), price: Number(pr) });
+  let basePrice = null;
+  if (cachedRow && hasShadeTypes(cachedRow)) {
+    // Every size needs both prices — a half-filled row is an error, not
+    // silently dropped, because the server rejects unknown sizes.
+    const isPrice = (n) => Number.isSafeInteger(n) && n > 0;
+    for (const row of variantRows) {
+      const h = Number(row.querySelector('.v-height').value);
+      const plain = Number(row.querySelector('.v-price-plain').value);
+      const embroidered = Number(row.querySelector('.v-price-embroidered').value);
+      if (!isPrice(h) || !isPrice(plain) || !isPrice(embroidered) || variants.some((v) => v.height === h)) {
+        msg.textContent = 'خطا: برای هر اندازه، ارتفاع (تکراری نباشد) و هر دو قیمت شید را وارد کنید.';
+        msg.className = 'msg error';
+        return;
+      }
+      variants.push({ height: h, price: plain, shades: { plain, embroidered } });
+    }
+    // The card and its "افزودن به سبد" use the base size, so it must be one
+    // of the sizes; the base price follows that size's plain price.
+    const base = variants.find((v) => v.height === height_cm);
+    if (!base) {
+      msg.textContent = 'خطا: ارتفاع پایه باید یکی از اندازه‌های بالا باشد.';
+      msg.className = 'msg error';
+      return;
+    }
+    basePrice = base.price;
+  } else {
+    for (const row of variantRows) {
+      const h = row.querySelector('.v-height').value;
+      const pr = row.querySelector('.v-price').value;
+      if (h === '' || pr === '') continue;
+      variants.push({ height: Number(h), price: Number(pr) });
+    }
   }
 
   const fields = { subcategory, style, material, height_cm, description, colors, variants };
+  if (basePrice != null) fields.price = basePrice;
   // body_size / shade_size only exist after supabase/migration-lamp-sizes.sql.
   // Send them only when the loaded row has them, so a save still works if
   // this panel is deployed before the migration runs.
-  const cachedRow = PRODUCTS_CACHE.find((x) => x.id === id);
   if (cachedRow && 'body_size' in cachedRow) Object.assign(fields, { body_size, shade_size });
 
   const { error } = await sb

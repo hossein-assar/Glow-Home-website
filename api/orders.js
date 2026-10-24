@@ -108,11 +108,39 @@ function parseCartKey(key) {
   const id = parts[0];
   let height = null;
   let colorIndex = null;
+  let shade = null;
   for (const part of parts.slice(1)) {
     if (part[0] === 'h') height = Number(part.slice(1));
     if (part[0] === 'c') colorIndex = Number(part.slice(1));
+    if (part[0] === 's') shade = part.slice(1);
   }
-  return { id, height, colorIndex };
+  return { id, height, colorIndex, shade };
+}
+
+// Shade types a size can be priced by (only گیسو so far). The prices live in
+// the DB on each variant: {"height": 140, "price": …, "shades": {"plain": …,
+// "embroidered": …}} — the client only names which one it wants.
+// ⚠ Same as SHADE_TYPES/shadeLine in payment-server/src/pricing.js and the
+// labels in app.js; `npm test` in payment-server/ checks this copy too.
+const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوزی' };
+
+function hasShadeTypes(p) {
+  return Array.isArray(p.variants) && p.variants.some((v) => v && v.shades && typeof v.shades === 'object');
+}
+
+// Strict: the cart key must name a stored height AND a stored shade type for
+// it. An old key (no shade, or a removed size) is rejected rather than
+// guessed — the customer never chose a shade for it, and the old sizes had
+// different prices. Returns { price, label } or { error }.
+function shadeLine(p, height, shade) {
+  const v = height == null ? null : p.variants.find((x) => x && x.shades && x.height === height);
+  const known = v && shade != null && Object.hasOwn(SHADE_TYPES, shade) && Object.hasOwn(v.shades, shade);
+  if (!known) {
+    return { error: `اندازه یا نوع شید «${p.name_fa}» در سبد شما دیگر معتبر نیست. لطفاً آن را از سبد حذف کنید و دوباره انتخاب کنید.` };
+  }
+  const price = Number(v.shades[shade]);
+  if (!Number.isSafeInteger(price) || price <= 0) return { error: `قیمت «${p.name_fa}» هنوز مشخص نشده است.` };
+  return { price, label: `${p.name_fa} (${v.height} سانتی‌متر) — ${SHADE_TYPES[shade]}` };
 }
 
 function escapeHtml(s) {
@@ -249,14 +277,18 @@ module.exports = async (req, res) => {
 
   for (const it of items) {
     const qty = Math.max(1, Math.floor(Number(it.qty) || 1));
-    const { id: slug, height, colorIndex } = parseCartKey(it.cartKey);
+    const { id: slug, height, colorIndex, shade } = parseCartKey(it.cartKey);
     const p = bySlug[slug];
     if (!p) return res.status(400).json({ ok: false, error: `محصول «${slug}» پیدا نشد.` });
     if (!p.in_stock) return res.status(400).json({ ok: false, error: `«${p.name_fa}» فعلاً موجود نیست.` });
 
     let price = p.price;
     let label = p.name_fa;
-    if (height != null && Array.isArray(p.variants) && p.variants.length) {
+    if (hasShadeTypes(p)) {
+      const line = shadeLine(p, height, shade);
+      if (line.error) return res.status(400).json({ ok: false, error: line.error });
+      ({ price, label } = line);
+    } else if (height != null && Array.isArray(p.variants) && p.variants.length) {
       const v = p.variants.find((x) => x.height === height);
       if (v) {
         price = v.price;
@@ -363,3 +395,9 @@ module.exports = async (req, res) => {
     items: orderItems.map((it) => ({ fa: it.name_fa, qty: it.qty, line: it.unit_price * it.qty })),
   });
 };
+
+// Pure helpers, exposed only so payment-server's tests can check this copy.
+module.exports.parseCartKey = parseCartKey;
+module.exports.shadeLine = shadeLine;
+module.exports.hasShadeTypes = hasShadeTypes;
+module.exports.SHADE_TYPES = SHADE_TYPES;

@@ -352,6 +352,7 @@ const state = {
   lightbox: null, // { id, index } while the full-screen photo popup is open
   selectedHeight: null, // chosen size on a product page with variants
   selectedColorIndex: 0, // chosen color on a product page with colors
+  selectedShade: 'plain', // chosen shade type on a product page with shade types (گیسو)
   placingOrder: false, // true while /api/orders is in flight
 };
 
@@ -364,29 +365,56 @@ function cartCount() {
 /** Cart keys are either a plain slug ("lale"), or for a product with size
  * and/or color choices, the slug plus "::h<height>" and/or "::c<colorIndex>"
  * so two different sizes/colors of the same product sit in the cart as
- * distinct, correctly-labelled lines instead of colliding. */
+ * distinct, correctly-labelled lines instead of colliding. A product with
+ * shade types (گیسو) also gets "::s<shade>", e.g. "gisoo::h140::splain". */
 function parseCartKey(key) {
   const parts = key.split('::');
   const id = parts[0];
   let height = null;
   let colorIndex = null;
+  let shade = null;
   for (const part of parts.slice(1)) {
     if (part[0] === 'h') height = Number(part.slice(1));
     if (part[0] === 'c') colorIndex = Number(part.slice(1));
+    if (part[0] === 's') shade = part.slice(1);
   }
-  return { id, height, colorIndex };
+  return { id, height, colorIndex, shade };
+}
+
+/** Shade types a size can be priced by. Prices come from the DB, stored on
+ * each variant as {height, price, shades: {plain, embroidered}}; `price` is
+ * the plain price. Same labels in api/orders.js and payment-server. */
+const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوزی' };
+
+function hasShadeTypes(p) {
+  return !!(p.variants && p.variants.some((v) => v && v.shades && typeof v.shades === 'object'));
+}
+
+/** The variant + shade price for a product with shade types, or null when
+ * the height or shade isn't a stored option (e.g. an old cart key). */
+function shadeOption(p, height, shade) {
+  const v = p.variants.find((x) => x && x.shades && x.height === height);
+  if (!v || shade == null || !Object.hasOwn(SHADE_TYPES, shade) || !Object.hasOwn(v.shades, shade)) return null;
+  return { variant: v, price: Number(v.shades[shade]) };
 }
 
 /** Resolve a cart key back to full product info, swapping in the chosen
  * variant's height/price and/or color when the key encodes them. */
 function cartLineData(key) {
-  const { id, height, colorIndex } = parseCartKey(key);
+  const { id, height, colorIndex, shade } = parseCartKey(key);
   const p = byId(id);
   if (!p) return null;
 
   let line = { ...p, cartKey: key };
 
-  if (height != null && p.variants && p.variants.length) {
+  if (hasShadeTypes(p)) {
+    // Strict, same as the server: an old key without a valid shade/size
+    // is not a line we can price (it is dropped after the catalog loads).
+    const o = shadeOption(p, height, shade);
+    if (!o) return null;
+    const heightFa = FA(o.variant.height) + ' سانتی‌متر';
+    line = { ...line, height: o.variant.height, heightFa, price: o.price, priceFa: money(o.price), shadeFa: SHADE_TYPES[shade] };
+  } else if (height != null && p.variants && p.variants.length) {
     const v = p.variants.find((x) => x.height === height);
     if (v) {
       const heightFa = v.height === 0 ? 'ست' : FA(v.height) + ' سانتی‌متر';
@@ -398,17 +426,23 @@ function cartLineData(key) {
     line.color = p.colors[colorIndex];
   }
 
-  line.meta = line.heightFa + ' · ' + line.materialFa + (line.color ? ' · ' + line.color : '');
+  line.meta =
+    line.heightFa +
+    (line.shadeFa ? ' · ' + line.shadeFa : '') +
+    ' · ' +
+    line.materialFa +
+    (line.color ? ' · ' + line.color : '');
   return line;
 }
 
 /** The cart key a product's own "افزودن به سبد" button should use — plain id
  * normally, or with a ::h/::c suffix when the product has size and/or color
  * choices (so even the default choice is tracked distinctly). */
-function cartKeyFor(p, height = p.height, colorIndex = 0) {
+function cartKeyFor(p, height = p.height, colorIndex = 0, shade = 'plain') {
   let key = p.id;
   if (p.variants && p.variants.length) key += '::h' + height;
   if (p.colors && p.colors.length > 1) key += '::c' + colorIndex;
+  if (hasShadeTypes(p)) key += '::s' + shade;
   return key;
 }
 
@@ -553,6 +587,7 @@ function onRouteChange() {
     const p = byId(param);
     state.selectedHeight = p ? p.height : null;
     state.selectedColorIndex = 0;
+    state.selectedShade = 'plain';
   }
 
   // Landing page after ZarinPal (payment-server's /api/verify redirects
@@ -1168,7 +1203,10 @@ function screenProduct() {
   const hasVariants = p.variants && p.variants.length > 1;
   const effectiveHeight = hasVariants ? state.selectedHeight ?? p.height : p.height;
   const effectiveVariant = hasVariants ? p.variants.find((v) => v.height === effectiveHeight) : null;
-  const effectivePrice = effectiveVariant ? effectiveVariant.price : p.price;
+  const hasShades = hasShadeTypes(p);
+  const effectiveShade = hasShades ? state.selectedShade : null;
+  const shadePrice = (v, shade) => (hasShades && v.shades ? Number(v.shades[shade]) : v.price);
+  const effectivePrice = effectiveVariant ? shadePrice(effectiveVariant, effectiveShade) : p.price;
   const effectivePriceFa = money(effectivePrice);
   const effectiveHeightFa =
     effectiveHeight === HEIGHT_UNKNOWN
@@ -1178,7 +1216,7 @@ function screenProduct() {
       : FA(effectiveHeight) + ' سانتی‌متر';
   const hasColors = p.colors && p.colors.length > 1;
   const effectiveColorIndex = hasColors ? state.selectedColorIndex ?? 0 : 0;
-  const cartKey = cartKeyFor(p, effectiveHeight, effectiveColorIndex);
+  const cartKey = cartKeyFor(p, effectiveHeight, effectiveColorIndex, effectiveShade);
 
   return `
   <div class="shell screen">
@@ -1213,8 +1251,27 @@ function screenProduct() {
           <select id="height-picker" class="input" data-act="select-height">
             ${p.variants
               .map((v) => {
-                const label = (v.height === 0 ? 'ست' : FA(v.height) + ' سانتی‌متر') + ' — ' + money(v.price);
+                const label =
+                  (v.height === 0 ? 'ست' : FA(v.height) + ' سانتی‌متر') + ' — ' + money(shadePrice(v, effectiveShade));
                 return `<option value="${v.height}" ${v.height === effectiveHeight ? 'selected' : ''}>${esc(label)}</option>`;
+              })
+              .join('')}
+          </select>
+        </div>`
+            : ''
+        }
+
+        ${
+          hasShades && effectiveVariant && effectiveVariant.shades
+            ? `
+        <div class="field" style="max-width:280px;margin-top:6px">
+          <label for="shade-picker">نوع شید</label>
+          <select id="shade-picker" class="input" data-act="select-shade">
+            ${Object.entries(SHADE_TYPES)
+              .filter(([key]) => Object.hasOwn(effectiveVariant.shades, key))
+              .map(([key, fa]) => {
+                const label = fa + ' — ' + money(shadePrice(effectiveVariant, key));
+                return `<option value="${key}" ${key === effectiveShade ? 'selected' : ''}>${esc(label)}</option>`;
               })
               .join('')}
           </select>
@@ -1243,6 +1300,7 @@ function screenProduct() {
           <div><dt>دسته</dt><dd>${esc(p.colFa)}</dd></div>
           <div><dt>جنس</dt><dd>${esc(p.materialFa)}</dd></div>
           <div><dt>ارتفاع</dt><dd>${esc(effectiveHeightFa)}</dd></div>
+          ${hasShades ? `<div><dt>نوع شید</dt><dd>${esc(SHADE_TYPES[effectiveShade])}</dd></div>` : ''}
           ${p.body_size ? `<div><dt>اندازه بدنه</dt><dd>${esc(sizeFa(p.body_size))}</dd></div>` : ''}
           ${p.shade_size ? `<div><dt>اندازه شید</dt><dd>${esc(sizeFa(p.shade_size))}</dd></div>` : ''}
           <div><dt>ساخت</dt><dd>دست‌ساز، استودیو Glow Home</dd></div>
@@ -1295,7 +1353,11 @@ function screenProduct() {
     p.inStock
       ? `
   <div class="action-bar">
-    <div class="ab-info"><b>${effectivePriceFa}</b>${p.provisional ? 'قیمت موقت' : esc(effectiveHeightFa + ' · ' + p.materialFa)}</div>
+    <div class="ab-info"><b>${effectivePriceFa}</b>${
+      p.provisional
+        ? 'قیمت موقت'
+        : esc(effectiveHeightFa + (hasShades ? ' · ' + SHADE_TYPES[effectiveShade] : '') + ' · ' + p.materialFa)
+    }</div>
     <button class="btn btn-accent" data-act="add-current" data-id="${cartKey}">افزودن به سبد</button>
   </div>`
       : `
@@ -1582,7 +1644,7 @@ function screenCheckout() {
           .map(
             (r) => `
           <div class="sum-row">
-            <span>${esc(r.fa)} × ${FA(r.qty)}</span>
+            <span>${esc(r.fa)}${r.shadeFa ? ' (' + esc(r.heightFa + ' · ' + r.shadeFa) + ')' : ''} × ${FA(r.qty)}</span>
             <span>${money(r.line)}</span>
           </div>`
           )
@@ -2385,6 +2447,10 @@ document.addEventListener('change', (e) => {
     state.selectedColorIndex = Number(e.target.value);
     render();
   }
+  if (e.target.id === 'shade-picker') {
+    state.selectedShade = e.target.value;
+    render();
+  }
   // شهر determines the only valid shipping method (see shippingMethodForCity)
   // — a <select> fires 'change' the instant a new option is picked, so this
   // reacts immediately. Picking "تهران" needs no further input; picking
@@ -2509,6 +2575,18 @@ async function loadProductsFromSupabase() {
     OUT_OF_STOCK = data.filter((r) => !r.in_stock).map((r) => r.slug);
 
     buildItems();
+    // A product with shade types only accepts keys naming a stored size and
+    // shade (the server rejects anything else), so drop old lines such as
+    // "gisoo::h100" instead of leaving the customer with an order that fails.
+    let dropped = false;
+    for (const key of Object.keys(state.cart)) {
+      const p = byId(parseCartKey(key).id);
+      if (p && hasShadeTypes(p) && !cartLineData(key)) {
+        delete state.cart[key];
+        dropped = true;
+      }
+    }
+    if (dropped) saveStore();
     render();
   } catch (e) {
     console.warn('[glow] live catalog fetch failed, using fallback:', e.message);

@@ -71,11 +71,38 @@ export function parseCartKey(key) {
   const id = parts[0];
   let height = null;
   let colorIndex = null;
+  let shade = null;
   for (const part of parts.slice(1)) {
     if (part[0] === 'h') height = Number(part.slice(1));
     if (part[0] === 'c') colorIndex = Number(part.slice(1));
+    if (part[0] === 's') shade = part.slice(1);
   }
-  return { id, height, colorIndex };
+  return { id, height, colorIndex, shade };
+}
+
+// Shade types a size can be priced by (only گیسو so far). Prices live in the
+// DB on each variant: {"height": 140, "price": …, "shades": {"plain": …,
+// "embroidered": …}}. Same labels in api/orders.js and app.js.
+export const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوزی' };
+
+export function hasShadeTypes(p) {
+  return Array.isArray(p.variants) && p.variants.some((v) => v && v.shades && typeof v.shades === 'object');
+}
+
+/**
+ * Strict pricing for a product with shade types: the cart key must name a
+ * stored height AND a stored shade type for it. Old keys (no shade, or a
+ * removed size) are rejected, never guessed. Returns { price, label } or { error }.
+ */
+export function shadeLine(p, height, shade) {
+  const v = height == null ? null : p.variants.find((x) => x && x.shades && x.height === height);
+  const known = v && shade != null && Object.hasOwn(SHADE_TYPES, shade) && Object.hasOwn(v.shades, shade);
+  if (!known) {
+    return { error: `اندازه یا نوع شید «${p.name_fa}» در سبد شما دیگر معتبر نیست. لطفاً آن را از سبد حذف کنید و دوباره انتخاب کنید.` };
+  }
+  const price = Number(v.shades[shade]);
+  if (!Number.isSafeInteger(price) || price <= 0) return { error: `قیمت «${p.name_fa}» هنوز مشخص نشده است.` };
+  return { price, label: `${p.name_fa} (${v.height} سانتی‌متر) — ${SHADE_TYPES[shade]}` };
 }
 
 const str = (v) => (typeof v === 'string' ? v.trim() : v == null ? '' : null);
@@ -155,14 +182,18 @@ export function priceCart({ items, products, discountCode, city }) {
   let subtotal = 0;
 
   for (const it of items) {
-    const { id: slug, height, colorIndex } = parseCartKey(it.cartKey);
+    const { id: slug, height, colorIndex, shade } = parseCartKey(it.cartKey);
     const p = bySlug[slug];
     if (!p) return { error: 'یکی از محصولات سبد پیدا نشد.' };
     if (!p.in_stock) return { error: `«${p.name_fa}» فعلاً موجود نیست.` };
 
     let price = Number(p.price);
     let label = p.name_fa;
-    if (height != null && Array.isArray(p.variants) && p.variants.length) {
+    if (hasShadeTypes(p)) {
+      const line = shadeLine(p, height, shade);
+      if (line.error) return { error: line.error };
+      ({ price, label } = line);
+    } else if (height != null && Array.isArray(p.variants) && p.variants.length) {
       const v = p.variants.find((x) => x.height === height);
       if (v) {
         price = Number(v.price);

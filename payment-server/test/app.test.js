@@ -20,6 +20,10 @@ function fakeDb() {
     async fetchProductsBySlugs(slugs) {
       return [
         { id: 'p1', slug: 'lamp-a', name_fa: 'آباژور الف', price: 1000000, variants: [], colors: [], in_stock: true },
+        {
+          id: 'g1', slug: 'gisoo', name_fa: 'گیسو', price: 9100000, colors: [], in_stock: true,
+          variants: [{ height: 140, price: 12980000, shades: { plain: 12980000, embroidered: 15450000 } }],
+        },
       ].filter((p) => slugs.includes(p.slug));
     },
     async nextOrderCode() { return 'GH-' + seq++; },
@@ -127,6 +131,22 @@ test('checkout sends config.callbackUrl to ZarinPal (CALLBACK_URL set)', async (
   base = `http://127.0.0.1:${server.address().port}`;
   assert.equal((await checkout()).status, 200);
   assert.equal(zp.calls.request[0].callbackUrl, 'https://glow-home.ir/api/pay-callback');
+});
+
+test('gisoo: tampered client price ignored, shade price from DB charged in Rial; old key rejected', async () => {
+  const body = { ...goodBody, discount_code: '', items: [{ cartKey: 'gisoo::h140::sembroidered', qty: 1, price: 1000 }] };
+  const res = await checkout(body);
+  assert.equal(res.status, 200);
+  assert.equal(orders[0].total, 15450000);
+  assert.equal(orders[0].payment_amount_rial, 154500000);
+  assert.equal(zp.calls.request[0].amount, 154500000);
+  assert.equal(items[0].unit_price, 15450000);
+  assert.equal(items[0].name_fa, 'گیسو (140 سانتی‌متر) — شید گلدوزی');
+
+  const old = await checkout({ ...body, items: [{ cartKey: 'gisoo::h140', qty: 1 }] });
+  assert.equal(old.status, 400);
+  assert.match((await old.json()).error, /نوع شید «گیسو»/);
+  assert.equal(orders.length, 1);
 });
 
 test('CORS: www allowed, other origins get no allow-origin header', async () => {
