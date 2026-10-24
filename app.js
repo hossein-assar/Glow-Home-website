@@ -908,7 +908,7 @@ function footer() {
             </div>
           </div>
         </div>
-        <div class="footer-base">${esc(COPY.footerBase)}</div>
+        <div class="footer-divider"></div>
       </div>
     </footer>`;
 }

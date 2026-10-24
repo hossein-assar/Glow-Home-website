@@ -380,5 +380,4 @@ const COPY = {
   instagramUrl: 'https://www.instagram.com/glow.home__?stkn=MXViNXFlZHN5aXAyNg==',
 
   footerBlurb: 'آباژور ها\nشمع های دست‌ساز\nشید های گلدوزی\nاکسسوری های منزل',
-  footerBase: 'این نسخه‌ی نمایشی طراحی است. قیمت‌ها موقت‌اند و هیچ سفارشی ثبت یا پرداختی انجام نمی‌شود.',
 };

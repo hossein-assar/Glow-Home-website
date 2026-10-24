@@ -1424,12 +1424,9 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
 }
 .footer-trust img { display: block; width: 88px; max-width: 100%; height: auto; }
 .static-trust { margin: 0; padding: 24px 16px; text-align: center; }
-.footer-base {
+.footer-divider {
   border-top: 1px solid var(--color-neutral-700);
   margin-top: 30px;
-  padding-top: 18px;
-  font-size: 13.5px;
-  color: var(--color-neutral-400);
 }
 
 /* ---- Bottom action bar (phone) ------------------------------------------ */
