@@ -1227,7 +1227,9 @@ function screenProduct() {
   if (hasShades && !p.variants.some((v) => v && v.shades && v.height === effectiveHeight)) {
     effectiveHeight = p.variants.find((v) => v && v.shades).height;
   }
-  const effectiveVariant = hasVariants ? p.variants.find((v) => v.height === effectiveHeight) : null;
+  // A product with shade types needs its size's variant for the shade picker
+  // and price even when it has only one size (نیلا), and no size picker.
+  const effectiveVariant = hasVariants || hasShades ? p.variants.find((v) => v.height === effectiveHeight) : null;
   const effectiveShade = hasShades ? state.selectedShade : null;
   const shadePrice = (v, shade) => (hasShades && v.shades ? Number(v.shades[shade]) : v.price);
   const effectivePrice = effectiveVariant ? shadePrice(effectiveVariant, effectiveShade) : p.price;
