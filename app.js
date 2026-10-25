@@ -276,7 +276,7 @@ function buildItems() {
       photos,
       subcategory: p.subcategory || null,
       style: p.style || null,
-      variants: Array.isArray(p.variants) ? p.variants : [],
+      variants: withBaseSize(p.variants, p.height, price ?? 0),
       colors: Array.isArray(p.colors) ? p.colors : [],
       inStock: !OUT.has(p.id),
     };
@@ -391,6 +391,22 @@ function hasShadeTypes(p) {
   return !!(p.variants && p.variants.some((v) => v && v.shades && typeof v.shades === 'object'));
 }
 
+/** The complete size list of a product without shade types: its variants,
+ * plus the base size (height + price) first when no variant has that height.
+ * Older rows store only the *other* sizes, so «مهتاب», base 40 / variants
+ * [50], is two sizes and gets a size picker. Shade-type products and products
+ * with no variants are unchanged. Applied once in buildItems(), so the picker,
+ * cards, cart keys and cartLineData() all see the same list.
+ * ⚠ Same function in admin/admin.js, api/orders.js and payment-server. */
+function withBaseSize(variants, baseHeight, basePrice) {
+  const list = Array.isArray(variants) ? variants : [];
+  if (!list.length || list.some((v) => v && v.shades && typeof v.shades === 'object')) return list;
+  const price = Number(basePrice);
+  if (!Number.isSafeInteger(baseHeight) || baseHeight < 0 || !Number.isSafeInteger(price) || price <= 0) return list;
+  if (list.some((v) => v && v.height === baseHeight)) return list;
+  return [{ height: baseHeight, price }, ...list];
+}
+
 /** The variant + shade price for a product with shade types, or null when
  * the height or shade isn't a stored option (e.g. an old cart key). */
 function shadeOption(p, height, shade) {
@@ -415,12 +431,13 @@ function cartLineData(key) {
     if (!o) return null;
     const heightFa = FA(o.variant.height) + ' سانتی‌متر';
     line = { ...line, height: o.variant.height, heightFa, price: o.price, priceFa: money(o.price), shadeFa: SHADE_TYPES[shade] };
-  } else if (height != null && p.variants && p.variants.length) {
-    const v = p.variants.find((x) => x.height === height);
-    if (v) {
-      const heightFa = v.height === 0 ? 'ست' : FA(v.height) + ' سانتی‌متر';
-      line = { ...line, height: v.height, heightFa, price: v.price, priceFa: money(v.price) };
-    }
+  } else if (height != null) {
+    // Strict, same as both servers: a height that isn't one of the sizes (a
+    // removed size, or any height on a product with no sizes) can't be priced.
+    const v = (p.variants || []).find((x) => x.height === height);
+    if (!v) return null;
+    const heightFa = v.height === 0 ? 'ست' : FA(v.height) + ' سانتی‌متر';
+    line = { ...line, height: v.height, heightFa, price: v.price, priceFa: money(v.price) };
   }
 
   if (colorIndex != null && p.colors && p.colors[colorIndex] != null) {
@@ -540,7 +557,7 @@ function totals() {
  * key isn't a stored size + shade — the cart would drop that line. */
 function addToCart(id, n = 1) {
   const p = byId(parseCartKey(id).id);
-  if (p && hasShadeTypes(p) && !cartLineData(id)) return false;
+  if (p && !cartLineData(id)) return false;
   state.cart[id] = (state.cart[id] || 0) + n;
   saveStore();
   return true;
@@ -2692,13 +2709,13 @@ async function loadProductsFromSupabase() {
   OUT_OF_STOCK = data.filter((r) => !r.in_stock).map((r) => r.slug);
 
   buildItems();
-  // A product with shade types only accepts keys naming a stored size and
-  // shade (the server rejects anything else), so drop old lines such as
-  // "gisoo::h100" instead of leaving the customer with an order that fails.
+  // Both servers accept only keys naming a real size (and, for shade-type
+  // products, a stored shade), so drop old lines such as "gisoo::h100" or a
+  // removed size instead of leaving the customer with an order that fails.
   let dropped = false;
   for (const key of Object.keys(state.cart)) {
     const p = byId(parseCartKey(key).id);
-    if (p && hasShadeTypes(p) && !cartLineData(key)) {
+    if (p && !cartLineData(key)) {
       delete state.cart[key];
       dropped = true;
     }

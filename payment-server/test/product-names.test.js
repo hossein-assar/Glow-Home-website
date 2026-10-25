@@ -48,6 +48,7 @@ function adminEnv(cached) {
       grab(adminJs, /const shadeKeysOf = [\s\S]*?;\n/),
       grab(adminJs, /const photoUploads = [^\n]*\n/),
       ...['escapeHtml', 'escapeAttr', 'toLatinDigits', 'unformatPrice', 'formatPrice', 'mainPhoto', 'mainPhotoFields',
+        'withBaseSize', 'baseSizeOf', 'sizesToSave', 'baseRowHtml',
         'variantRowHtml', 'shadeVariantRowHtml', 'editPanelHtml', 'rowHtml', 'saveProductFull'].map((n) => fnSrc(adminJs, n)),
       'const photoFieldHtml = () => "";',
       'const COLLECTION_LABEL = {};',

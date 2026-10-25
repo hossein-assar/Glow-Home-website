@@ -18,7 +18,7 @@ export function createDb({ supabaseUrl, serviceRoleKey }) {
     async fetchProductsBySlugs(slugs) {
       const { data, error } = await sb
         .from('products')
-        .select('id, slug, name_fa, price, variants, colors, in_stock')
+        .select('id, slug, name_fa, price, height_cm, variants, colors, in_stock')
         .in('slug', slugs);
       check(error, 'fetch products');
       return data || [];

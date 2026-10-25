@@ -160,7 +160,7 @@ test('stale nila cart keys cannot be added, and are the ones the catalog load dr
     assert.equal(sf.cartLineData(key), null, key); // loadProductsFromSupabase drops lines where this is null
   }
   assert.deepEqual(sf.state.cart, {});
-  assert.match(appJs, /if \(p && hasShadeTypes\(p\) && !cartLineData\(key\)\) \{\n\s*delete state\.cart\[key\];/);
+  assert.match(appJs, /if \(p && !cartLineData\(key\)\) \{\n\s*delete state\.cart\[key\];/);
 });
 
 test('nila product page: «نوع شید» picker with both shades, no size picker, price and cart key follow the shade', () => {

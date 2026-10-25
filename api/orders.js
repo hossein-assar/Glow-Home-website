@@ -144,6 +144,33 @@ function shadeLine(p, height, shade) {
   return { price, label: `${p.name_fa} (${v.height} سانتی‌متر) — ${SHADE_TYPES[shade]}` };
 }
 
+// The complete size list of a product without shade types: its `variants`,
+// plus the base size (height_cm + products.price) first when no variant has
+// that height. Older rows store only the *other* sizes in `variants` (the
+// schema once described it that way), so «مهتاب», base 40 / variants [50],
+// is two sizes, not one. Shade-type products and products with no variants
+// are returned unchanged — their sizes are exactly what is stored.
+// ⚠ Same function in app.js, admin/admin.js, api/orders.js and
+// payment-server/src/pricing.js; `npm test` in payment-server/ checks them.
+function withBaseSize(variants, baseHeight, basePrice) {
+  const list = Array.isArray(variants) ? variants : [];
+  if (!list.length || list.some((v) => v && v.shades && typeof v.shades === 'object')) return list;
+  const price = Number(basePrice);
+  if (!Number.isSafeInteger(baseHeight) || baseHeight < 0 || !Number.isSafeInteger(price) || price <= 0) return list;
+  if (list.some((v) => v && v.height === baseHeight)) return list;
+  return [{ height: baseHeight, price }, ...list];
+}
+
+// Strict, same as sizeLine in payment-server/src/pricing.js: a key naming a
+// height must name one of withBaseSize()'s sizes, or it is rejected; no
+// height is the base size. Returns { price, label } or { error }.
+function sizeLine(p, height) {
+  if (height == null) return { price: p.price, label: p.name_fa };
+  const v = withBaseSize(p.variants, p.height_cm, p.price).find((x) => x && x.height === height);
+  if (!v) return { error: `اندازه‌ی «${p.name_fa}» در سبد شما دیگر معتبر نیست. لطفاً آن را از سبد حذف کنید و دوباره انتخاب کنید.` };
+  return { price: Number(v.price), label: `${p.name_fa} (${v.height} سانتی‌متر)` };
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -264,7 +291,7 @@ module.exports = async (req, res) => {
   const slugs = [...new Set(items.map((it) => parseCartKey(it.cartKey).id))];
   const { data: products, error: fetchErr } = await sb
     .from('products')
-    .select('id, slug, name_fa, price, variants, colors, in_stock')
+    .select('id, slug, name_fa, price, height_cm, variants, colors, in_stock')
     .in('slug', slugs);
 
   if (fetchErr) {
@@ -289,12 +316,10 @@ module.exports = async (req, res) => {
       const line = shadeLine(p, height, shade);
       if (line.error) return res.status(400).json({ ok: false, error: line.error });
       ({ price, label } = line);
-    } else if (height != null && Array.isArray(p.variants) && p.variants.length) {
-      const v = p.variants.find((x) => x.height === height);
-      if (v) {
-        price = v.price;
-        label += ` (${v.height} سانتی‌متر)`;
-      }
+    } else {
+      const line = sizeLine(p, height);
+      if (line.error) return res.status(400).json({ ok: false, error: line.error });
+      ({ price, label } = line);
     }
     if (colorIndex != null && Array.isArray(p.colors) && p.colors[colorIndex] != null) {
       label += ` — ${p.colors[colorIndex]}`;
@@ -404,3 +429,5 @@ module.exports.parseCartKey = parseCartKey;
 module.exports.shadeLine = shadeLine;
 module.exports.hasShadeTypes = hasShadeTypes;
 module.exports.SHADE_TYPES = SHADE_TYPES;
+module.exports.withBaseSize = withBaseSize;
+module.exports.sizeLine = sizeLine;

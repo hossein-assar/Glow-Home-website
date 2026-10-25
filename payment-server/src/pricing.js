@@ -106,6 +106,37 @@ export function shadeLine(p, height, shade) {
   return { price, label: `${p.name_fa} (${v.height} سانتی‌متر) — ${SHADE_TYPES[shade]}` };
 }
 
+// The complete size list of a product without shade types: its `variants`,
+// plus the base size (height_cm + products.price) first when no variant has
+// that height. Older rows store only the *other* sizes in `variants` (the
+// schema once described it that way), so «مهتاب», base 40 / variants [50],
+// is two sizes, not one. Shade-type products and products with no variants
+// are returned unchanged — their sizes are exactly what is stored.
+// ⚠ Same function in app.js, admin/admin.js, api/orders.js and
+// payment-server/src/pricing.js; `npm test` in payment-server/ checks them.
+export function withBaseSize(variants, baseHeight, basePrice) {
+  const list = Array.isArray(variants) ? variants : [];
+  if (!list.length || list.some((v) => v && v.shades && typeof v.shades === 'object')) return list;
+  const price = Number(basePrice);
+  if (!Number.isSafeInteger(baseHeight) || baseHeight < 0 || !Number.isSafeInteger(price) || price <= 0) return list;
+  if (list.some((v) => v && v.height === baseHeight)) return list;
+  return [{ height: baseHeight, price }, ...list];
+}
+
+/**
+ * Strict pricing by size for a product without shade types: a key that names
+ * a height must name one of withBaseSize()'s sizes — a removed size, a typo,
+ * or any height on a product with no sizes is rejected, never priced at the
+ * base price. A key with no height is the base size (products.price).
+ * Returns { price, label } or { error }.
+ */
+export function sizeLine(p, height) {
+  if (height == null) return { price: Number(p.price), label: p.name_fa };
+  const v = withBaseSize(p.variants, p.height_cm, p.price).find((x) => x && x.height === height);
+  if (!v) return { error: `اندازه‌ی «${p.name_fa}» در سبد شما دیگر معتبر نیست. لطفاً آن را از سبد حذف کنید و دوباره انتخاب کنید.` };
+  return { price: Number(v.price), label: `${p.name_fa} (${v.height} سانتی‌متر)` };
+}
+
 const str = (v) => (typeof v === 'string' ? v.trim() : v == null ? '' : null);
 
 /**
@@ -173,7 +204,7 @@ export function validateCheckoutBody(body) {
 
 /**
  * Re-prices the cart from DB product rows. Never uses a client price.
- * products: rows with { id, slug, name_fa, price, variants, colors, in_stock }.
+ * products: rows with { id, slug, name_fa, price, height_cm, variants, colors, in_stock }.
  * Returns { error } or { orderItems, subtotal, discount, discountCode, total,
  * shippingMethod, shippingCost }. `codes` defaults to DISCOUNT_CODES (tests
  * pass their own).
@@ -195,12 +226,10 @@ export function priceCart({ items, products, discountCode, city, codes = DISCOUN
       const line = shadeLine(p, height, shade);
       if (line.error) return { error: line.error };
       ({ price, label } = line);
-    } else if (height != null && Array.isArray(p.variants) && p.variants.length) {
-      const v = p.variants.find((x) => x.height === height);
-      if (v) {
-        price = Number(v.price);
-        label += ` (${v.height} سانتی‌متر)`;
-      }
+    } else {
+      const line = sizeLine(p, height);
+      if (line.error) return { error: line.error };
+      ({ price, label } = line);
     }
     if (colorIndex != null && Array.isArray(p.colors) && p.colors[colorIndex] != null) {
       label += ` — ${p.colors[colorIndex]}`;

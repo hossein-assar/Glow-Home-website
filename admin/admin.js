@@ -173,6 +173,86 @@ document.addEventListener('input', (e) => {
   if (document.activeElement === el) el.setSelectionRange(caret, caret);
 });
 
+/* ---- Sizes: the base size is a row ---------------------------------------
+   The size list is the COMPLETE list of sizes. Older rows stored only the
+   *other* sizes in `variants`, so «مهتاب», base 40 / 3,500,000 with a list of
+   one row (50 / 4,000,000), reached the shop as a single size and showed no
+   size picker. The full-edit panel now shows the base size — «ارتفاع پایه»
+   plus the price box in the row above — as the first row of the list,
+   read-only and kept in step with those two fields as they are typed, and
+   «ذخیره همه» writes it into the list along with the price. Shade-type
+   products keep their own rows, where the base must already be a size. */
+
+// ⚠ Same function in app.js, api/orders.js and payment-server/src/pricing.js.
+function withBaseSize(variants, baseHeight, basePrice) {
+  const list = Array.isArray(variants) ? variants : [];
+  if (!list.length || list.some((v) => v && v.shades && typeof v.shades === 'object')) return list;
+  const price = Number(basePrice);
+  if (!Number.isSafeInteger(baseHeight) || baseHeight < 0 || !Number.isSafeInteger(price) || price <= 0) return list;
+  if (list.some((v) => v && v.height === baseHeight)) return list;
+  return [{ height: baseHeight, price }, ...list];
+}
+
+/** The base size row: { height, price } from «ارتفاع پایه» and the price
+ * box, or null when either is missing or there is no other size — a product
+ * with only its base size has no size list (and no size picker). */
+function baseSizeOf(heightValue, priceValue, otherSizes) {
+  const h = String(toLatinDigits(heightValue ?? '')).trim();
+  const height = h === '' ? NaN : Number(h);
+  const price = Number(unformatPrice(priceValue));
+  if (!otherSizes || !Number.isSafeInteger(height) || height < 0 || !Number.isSafeInteger(price) || price <= 0) return null;
+  return { height, price };
+}
+
+/** What «ذخیره همه» writes for a product without shade types: the base size
+ * first, then the other rows (half-empty rows skipped, as before). A height
+ * listed twice — including another row at the base height — is an error,
+ * not a silent merge. Returns { variants, price? } or { error }. */
+function sizesToSave(otherRows, heightValue, priceValue) {
+  const others = otherRows
+    .filter((r) => r.height !== '' && r.price !== '')
+    .map((r) => ({ height: Number(r.height), price: Number(r.price) }));
+  const base = baseSizeOf(heightValue, priceValue, others.length);
+  const variants = base ? [{ height: base.height, price: base.price }, ...others] : others;
+  const seen = new Set();
+  for (const v of variants) {
+    if (seen.has(v.height)) {
+      return {
+        error: `خطا: اندازه‌ی ${v.height} سانتی‌متر دو بار آمده است.` +
+          (base && v.height === base.height ? ' این ارتفاع پایه است و ردیف اول فهرست — ردیف تکراری را حذف کنید.' : ' یکی را حذف کنید.'),
+      };
+    }
+    seen.add(v.height);
+  }
+  return base ? { variants, price: base.price } : { variants };
+}
+
+// The base-size row follows «ارتفاع پایه» and the price box as they are typed.
+document.addEventListener('input', (e) => {
+  const m = /^(?:f-height|price)-(.+)$/.exec((e.target && e.target.id) || '');
+  if (m) syncBaseRow(m[1]);
+});
+
+/** Adds, updates or removes the base-size row so it always matches the two
+ * fields above it. No-op for shade-type products or a closed panel. */
+function syncBaseRow(id) {
+  const list = document.getElementById(`variants-list-${id}`);
+  const heightInput = document.getElementById(`f-height-${id}`);
+  const p = PRODUCTS_CACHE.find((x) => x.id === id);
+  if (!list || !heightInput || !p || hasShadeTypes(p)) return;
+  const others = list.querySelectorAll('.variant-row:not([data-base])').length;
+  const base = baseSizeOf(heightInput.value, document.getElementById(`price-${id}`).value, others);
+  const row = list.querySelector('.variant-row[data-base]');
+  if (!base) {
+    if (row) row.remove();
+  } else if (row) {
+    row.querySelector('.v-height').value = base.height;
+    row.querySelector('.v-price').value = formatPrice(base.price);
+  } else {
+    list.insertAdjacentHTML('afterbegin', baseRowHtml(base.height, base.price));
+  }
+}
+
 /* ---- Photo upload ----------------------------------------------------------
    «انتخاب عکس از کامپیوتر» (or drag-and-drop onto the preview): the photo is
    checked, turned upright (the browser applies the EXIF orientation when
@@ -503,6 +583,10 @@ function rowHtml(p) {
 function editPanelHtml(p) {
   const variants = Array.isArray(p.variants) ? p.variants : [];
   const shadeKeys = hasShadeTypes(p) ? shadeKeysOf(p) : null;
+  // Without shade types: the base size first (see "Sizes" above), then the
+  // other sizes. A stored row at the base height IS the base row.
+  const otherSizes = shadeKeys ? variants : withBaseSize(variants, p.height_cm, p.price).filter((v) => v.height !== p.height_cm);
+  const baseSize = shadeKeys ? null : baseSizeOf(p.height_cm, p.price, otherSizes.length);
   const colors = Array.isArray(p.colors) ? p.colors.join('، ') : '';
   return `
     <tr class="edit-row" id="edit-row-${p.id}">
@@ -575,7 +659,7 @@ function editPanelHtml(p) {
               : 'اندازه‌ها و قیمت هر اندازه (در صورت وجود چند سایز)'
           }</label>
           <div id="variants-list-${p.id}">
-            ${variants
+            ${baseSize ? baseRowHtml(baseSize.height, baseSize.price) : ''}${otherSizes
               .map((v, i) => (shadeKeys ? shadeVariantRowHtml(i, shadeKeys, v) : variantRowHtml(p.id, i, v.height, v.price)))
               .join('')}
           </div>
@@ -587,6 +671,17 @@ function editPanelHtml(p) {
         </div>
       </td>
     </tr>`;
+}
+
+/** The base size, read-only: it is «ارتفاع پایه» and the price box above,
+ * and changes with them. No «حذف» — to drop it, change the base height. */
+function baseRowHtml(height, price) {
+  return `
+    <div class="variant-row" data-base="1">
+      <input type="number" class="v-height" value="${height}" readonly tabindex="-1">
+      <input type="text" inputmode="numeric" dir="ltr" class="v-price price-input" value="${formatPrice(price)}" readonly tabindex="-1">
+      <span style="color:#8a7d6e; font-size:12px">اندازه پایه — از «ارتفاع پایه» و قیمت بالا</span>
+    </div>`;
 }
 
 function variantRowHtml(pid, i, height, price) {
@@ -635,17 +730,22 @@ function toggleEdit(id) {
       'beforeend',
       hasShadeTypes(p) ? shadeVariantRowHtml(idx, shadeKeysOf(p)) : variantRowHtml(id, idx, '', '')
     );
-    wireVariantRemove(list);
+    // The first added size brings the base size in with it, as row one.
+    syncBaseRow(id);
+    wireVariantRemove(list, () => syncBaseRow(id));
   });
-  wireVariantRemove(document.getElementById(`variants-list-${id}`));
+  wireVariantRemove(document.getElementById(`variants-list-${id}`), () => syncBaseRow(id));
 
   wirePhotoField(id, `f-photo-${id}`, () => p.slug);
   document.getElementById(`save-full-${id}`).addEventListener('click', () => saveProductFull(id));
 }
 
-function wireVariantRemove(list) {
+function wireVariantRemove(list, onRemove) {
   list.querySelectorAll('.remove-variant').forEach((btn) => {
-    btn.onclick = () => btn.closest('.variant-row').remove();
+    btn.onclick = () => {
+      btn.closest('.variant-row').remove();
+      if (onRemove) onRemove();
+    };
   });
 }
 
@@ -653,10 +753,17 @@ async function saveProduct(id) {
   const price = Number(unformatPrice(document.getElementById(`price-${id}`).value)) || 0;
   const price_provisional = document.getElementById(`prov-${id}`).checked;
   const in_stock = document.getElementById(`stock-${id}`).checked;
+  const fields = { price, price_provisional, in_stock };
+  // The price box is the base size's price: a stored row at the base height
+  // moves with it, or the shop's size picker would keep the old price.
+  const row = PRODUCTS_CACHE.find((x) => x.id === id);
+  if (row && !hasShadeTypes(row) && Array.isArray(row.variants) && row.variants.some((v) => v && v.height === row.height_cm)) {
+    fields.variants = row.variants.map((v) => (v && v.height === row.height_cm ? { ...v, price } : v));
+  }
 
   const { error } = await sb
     .from('products')
-    .update({ price, price_provisional, in_stock, updated_at: new Date().toISOString() })
+    .update({ ...fields, updated_at: new Date().toISOString() })
     .eq('id', id);
 
   if (error) {
@@ -700,7 +807,7 @@ async function saveProductFull(id) {
     : [];
 
   const cachedRow = PRODUCTS_CACHE.find((x) => x.id === id);
-  const variantRows = document.querySelectorAll(`#variants-list-${id} .variant-row`);
+  const variantRows = document.querySelectorAll(`#variants-list-${id} .variant-row:not([data-base])`);
   const variants = [];
   let basePrice = null;
   if (cachedRow && hasShadeTypes(cachedRow)) {
@@ -730,12 +837,21 @@ async function saveProductFull(id) {
     }
     basePrice = base.price;
   } else {
+    const otherRows = [];
     for (const row of variantRows) {
       const h = row.querySelector('.v-height').value;
       const pr = unformatPrice(row.querySelector('.v-price').value);
-      if (h === '' || pr === '') continue;
-      variants.push({ height: Number(h), price: Number(pr) });
+      otherRows.push({ height: h, price: pr });
     }
+    // The base size comes from the two fields, never from its read-only row.
+    const sizes = sizesToSave(otherRows, heightVal, document.getElementById(`price-${id}`).value);
+    if (sizes.error) {
+      msg.textContent = sizes.error;
+      msg.className = 'msg error';
+      return;
+    }
+    variants.push(...sizes.variants);
+    if (sizes.price != null) basePrice = sizes.price;
   }
 
   const photoPath = document.getElementById(`f-photo-${id}`).value.trim();

@@ -124,10 +124,12 @@ test('a broken stored shade price is never charged as free', () => {
   }
 });
 
-test('products without shade types behave exactly as before', () => {
+test('products without shade types: priced by size, shade part ignored', () => {
   assert.equal(price('lamp-a::h140').total, 1500000);
   assert.equal(price('lamp-a::h140::sembroidered').total, 1500000); // shade part ignored
-  assert.equal(price('lamp-a::h999').total, 1000000); // existing fallback to base price, unchanged
+  // An unknown height used to fall back to the base price; it is rejected
+  // since sizes became strict (see test/base-size.test.js).
+  assert.match(price('lamp-a::h999').error, /دیگر معتبر نیست/);
   assert.equal(price('lamp-a').orderItems[0].name_fa, 'آباژور الف');
   assert.equal(orders.hasShadeTypes(lampA), false);
 });

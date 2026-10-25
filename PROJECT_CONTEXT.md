@@ -148,7 +148,17 @@ decisions from code alone — read this before making structural changes.
 - `style`: placement-based, lamps only — رومیزی (desk) vs کنار سالنی
   (sofa-side/floor). A second, independent filter row from subcategory.
 - `variants`: `[{height, price}]` jsonb — powers the size-picker dropdown on
-  the product page. A product with 0-1 variants shows no dropdown.
+  the product page. A product with 0-1 sizes shows no dropdown.
+  **The base size is a size.** Older rows store only the *other* sizes here
+  (schema.sql's comment still says so), so `withBaseSize()` — one function,
+  copied in app.js, admin/admin.js, api/orders.js and payment-server — adds
+  `height_cm` + `price` as the first size whenever the list is non-empty and
+  no entry has that height. «شید گلدوزی مهتاب» (base 40, variants [50]) is
+  two sizes because of it. Shade-type products are exempt: their sizes are
+  exactly what is stored. The admin's «ویرایش کامل» shows the base size as a
+  read-only first row that follows «ارتفاع پایه» and the price box, and saves
+  the complete list; the quick «ذخیره» moves a stored base row's price with
+  the price box, so the two never disagree.
 - `colors`: `text[]` — powers the color-picker dropdown. Same price
   regardless of color (no per-color pricing exists).
 - `photos`: ordered array, first element is always the "اصلی" (primary/hero)
@@ -185,6 +195,12 @@ admin/admin.js, api/orders.js and payment-server. Such a product is priced
 strictly on both servers — a key without a stored height + shade (e.g. an
 old `gisoo::h100`) is rejected, not guessed; the storefront drops those
 stale lines from the cart once the live catalog loads.
+
+Sizes are strict the same way for every product: a key naming a height must
+name one of `withBaseSize()`'s sizes, or both servers reject it (it used to
+be priced at the base price, whatever the height). A key with no height is
+the base size. The storefront drops any cart line it can't price —
+`cartLineData()` returns null — when the catalog loads.
 
 ## Known gotchas (already fixed, don't reintroduce)
 
