@@ -54,12 +54,13 @@ function makeEnv() {
   doc.addEventListener = (type, fn) => (doc.listeners[type] ||= []).push(fn);
   const $ = (sel) => (sel === '#app' ? app : sel === '#app > header' ? app.nodes.find((n) => n.tag === 'header') || null : null);
 
-  const state = { route: 'home', query: '', filter: 'lamps', cartCount: 0 };
+  const state = { route: 'home', query: '', filter: 'lamps', cartCount: 0, catalog: 'ready' };
   const env = new Function(
     'document', '$', 'state', 'go',
     `const SCREENS = { home: () => 'HOME', shop: () => 'SHOP[' + state.query + ']' };
      const TITLES = { home: 'h' };
      const screenHome = SCREENS.home;
+     const CATALOG_SCREENS = new Set();
      const header = () => '<header>badge=' + state.cartCount + '</header>';
      const footer = () => '<footer></footer>';
      const tabbar = () => '';

@@ -3,7 +3,39 @@ const sb = getSupabaseClient();
 const loginView = document.getElementById('login-view');
 const appView = document.getElementById('app-view');
 const notAdminView = document.getElementById('not-admin-view');
+const offlineView = document.getElementById('offline-view');
 const loginMsg = document.getElementById('login-msg');
+
+const NETWORK_ERROR = 'اتصال به سرور برقرار نشد. لطفاً اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.';
+
+/** True when the request never got a real answer from Supabase (offline,
+ * blocked, timed out, or the /sb proxy answered with an error page instead
+ * of Supabase's JSON) — as opposed to Supabase answering with an error. */
+function isNetworkError(error) {
+  if (!error) return false;
+  if (error.name === 'AuthRetryableFetchError' || error.name === 'AuthUnknownError') return true;
+  if (error.status === 0 || [502, 503, 504].includes(error.status)) return true;
+  const m = String(error.message || error.error || error);
+  return /failed to fetch|networkerror|network request failed|load failed|fetch failed|err_|aborterror|aborted|timed? ?out|not valid json|unexpected token|router_external_target/i.test(m);
+}
+
+/** Text to show for a Supabase error: a readable Persian message for
+ * connection problems, Supabase's own message otherwise. */
+function adminErrorText(error) {
+  return isNetworkError(error) ? NETWORK_ERROR : String((error && error.message) || error || '');
+}
+
+/** Puts NETWORK_ERROR and a «تلاش دوباره» button into `el`. */
+function showRetry(el, retry, wrap = (html) => html) {
+  el.innerHTML = wrap(
+    `<span style="color:#b3432f">${escapeHtml(NETWORK_ERROR)}</span> <button class="btn ghost" type="button" style="padding:4px 12px">تلاش دوباره</button>`
+  );
+  el.querySelector('button').addEventListener('click', retry);
+}
+
+function showView(view) {
+  for (const v of [loginView, appView, notAdminView, offlineView]) v.style.display = v === view ? 'block' : 'none';
+}
 
 document.getElementById('btn-signin').addEventListener('click', async () => {
   const email = document.getElementById('email').value.trim();
@@ -21,7 +53,7 @@ document.getElementById('btn-signin').addEventListener('click', async () => {
   const { error } = await sb.auth.signInWithPassword({ email, password });
 
   if (error) {
-    loginMsg.textContent = error.message;
+    loginMsg.textContent = adminErrorText(error);
     loginMsg.className = 'msg error';
     return;
   }
@@ -37,13 +69,9 @@ document.getElementById('btn-signout').addEventListener('click', signOut);
 document.getElementById('btn-signout-2').addEventListener('click', signOut);
 
 async function checkAdminAndRender() {
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) {
-    loginView.style.display = 'block';
-    appView.style.display = 'none';
-    notAdminView.style.display = 'none';
-    return;
-  }
+  const { data: { session } = {}, error: sessionError } = await sb.auth.getSession();
+  if (isNetworkError(sessionError)) return showOffline();
+  if (!session) return showView(loginView);
 
   const { data: profile, error } = await sb
     .from('profiles')
@@ -51,18 +79,19 @@ async function checkAdminAndRender() {
     .eq('id', session.user.id)
     .single();
 
-  if (error || !profile || !profile.is_admin) {
-    loginView.style.display = 'none';
-    appView.style.display = 'none';
-    notAdminView.style.display = 'block';
-    return;
-  }
+  // A connection problem is not "not an admin": offer a retry instead.
+  if (isNetworkError(error)) return showOffline();
+  if (error || !profile || !profile.is_admin) return showView(notAdminView);
 
-  loginView.style.display = 'none';
-  notAdminView.style.display = 'none';
-  appView.style.display = 'block';
+  showView(appView);
   loadProducts();
 }
+
+function showOffline() {
+  document.getElementById('offline-msg').textContent = NETWORK_ERROR;
+  showView(offlineView);
+}
+document.getElementById('btn-offline-retry').addEventListener('click', () => checkAdminAndRender());
 
 /* ---- Tabs ------------------------------------------------------------- */
 
@@ -158,6 +187,9 @@ const PHOTO_BUCKET = 'product-images';
 const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const PHOTO_MAX_BYTES = 15 * 1024 * 1024;
 const PHOTO_MAX_SIDE = 1600;
+// Uploads go through our /sb proxy on Vercel; Vercel's documented request-body
+// cap (for functions) is 4.5 MB, so stay under it after resizing.
+const PHOTO_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 const photoUploads = new Set(); // photo fields with an upload in flight
 
 /** '' when the file may be processed, else a Persian error. */
@@ -187,7 +219,7 @@ function photoFileName(slug, now, ext) {
 /** Preview src for a stored path. Old relative paths ("images/x.jpg") are
  * relative to the site root, but this page lives under /admin/. */
 function resolvePhotoSrc(path) {
-  const p = String(path ?? '').trim();
+  const p = proxiedPhotoUrl(path); // supabase.co storage URLs load through /sb
   if (!p) return '';
   if (/^https?:\/\//i.test(p) || p.startsWith('/')) return p;
   return '/' + p;
@@ -312,6 +344,9 @@ function wirePhotoField(key, urlInputId, slugOf) {
         console.error('[admin] photo decode failed:', err);
         return setStatus('این عکس باز نشد. فایل دیگری را امتحان کنید.', 'error');
       }
+      if (prepared.blob.size > PHOTO_UPLOAD_MAX_BYTES) {
+        return setStatus('حجم عکس بعد از فشرده‌سازی هنوز زیاد است. عکس دیگری انتخاب کنید.', 'error');
+      }
       const name = photoFileName(slugOf(), Date.now(), prepared.ext);
       const { error } = await sb.storage
         .from(PHOTO_BUCKET)
@@ -320,9 +355,11 @@ function wirePhotoField(key, urlInputId, slugOf) {
         console.error('[admin] photo upload failed:', error);
         return setStatus(photoUploadError(error), 'error');
       }
+      // Store the canonical supabase.co URL (the client's own URL is this
+      // site's /sb proxy); previews and the shop rewrite it for display.
       const { data } = sb.storage.from(PHOTO_BUCKET).getPublicUrl(name);
-      urlInput.value = data.publicUrl;
-      showPreview(data.publicUrl);
+      urlInput.value = canonicalPhotoUrl(data.publicUrl);
+      showPreview(urlInput.value);
       setStatus('عکس آپلود شد. برای ثبت، محصول را ذخیره کنید.', 'ok');
     } catch (err) {
       console.error('[admin] photo upload failed:', err);
@@ -389,6 +426,7 @@ async function loadProducts() {
     .order('created_at', { ascending: false });
 
   if (error) {
+    if (isNetworkError(error)) return showRetry(tbody, loadProducts, (html) => `<tr><td colspan="7">${html}</td></tr>`);
     tbody.innerHTML = `<tr><td colspan="7" style="color:#b3432f">خطا: ${escapeHtml(error.message)}</td></tr>`;
     return;
   }
@@ -622,7 +660,7 @@ async function saveProduct(id) {
     .eq('id', id);
 
   if (error) {
-    alert('خطا در ذخیره: ' + error.message);
+    alert('خطا در ذخیره: ' + adminErrorText(error));
   } else {
     loadProducts();
   }
@@ -722,7 +760,7 @@ async function saveProductFull(id) {
     .eq('id', id);
 
   if (error) {
-    msg.textContent = 'خطا: ' + error.message;
+    msg.textContent = 'خطا: ' + adminErrorText(error);
     msg.className = 'msg error';
     return;
   }
@@ -742,7 +780,7 @@ async function deleteProduct(id, name) {
   if (!confirm(`حذف «${name}»؟ این عمل قابل بازگشت نیست.`)) return;
   const { error } = await sb.from('products').delete().eq('id', id);
   if (error) {
-    alert('خطا در حذف: ' + error.message);
+    alert('خطا در حذف: ' + adminErrorText(error));
     return;
   }
   loadProducts();
@@ -783,7 +821,7 @@ document.getElementById('btn-add').addEventListener('click', async () => {
 
   const { error } = await sb.from('products').insert(payload);
   if (error) {
-    addMsg.textContent = 'خطا: ' + error.message;
+    addMsg.textContent = 'خطا: ' + adminErrorText(error);
     addMsg.className = 'msg error';
     return;
   }
@@ -843,6 +881,7 @@ async function loadOrders() {
     .limit(100);
 
   if (error) {
+    if (isNetworkError(error)) return showRetry(list, loadOrders, (html) => `<p>${html}</p>`);
     list.innerHTML = `<p style="color:#b3432f">خطا: ${escapeHtml(error.message)}</p>`;
     return;
   }
@@ -1066,7 +1105,7 @@ function paymentInfoHtml(o) {
 async function updateOrderStatus(id, status) {
   const { error } = await sb.from('orders').update({ status }).eq('id', id);
   if (error) {
-    alert('خطا در تغییر وضعیت: ' + error.message);
+    alert('خطا در تغییر وضعیت: ' + adminErrorText(error));
     loadOrders();
     return;
   }

@@ -172,7 +172,7 @@
   .top-products li { display: flex; justify-content: space-between; font-size: 13.5px; padding: 3px 0; }
 
   #app-view { display: none; }
-  #not-admin-view { display: none; text-align: center; padding: 60px 20px; }
+  #not-admin-view, #offline-view { display: none; text-align: center; padding: 60px 20px; }
 </style>
 </head>
 <body>
@@ -185,6 +185,12 @@
     <button class="btn" id="btn-signin" style="width:100%; justify-content:center">ورود</button>
     <div id="login-msg" class="msg"></div>
   </div>
+</div>
+
+<div id="offline-view" class="wrap">
+  <h1>اتصال برقرار نشد</h1>
+  <p id="offline-msg"></p>
+  <button class="btn" id="btn-offline-retry">تلاش دوباره</button>
 </div>
 
 <div id="not-admin-view" class="wrap">

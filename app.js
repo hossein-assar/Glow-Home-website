@@ -242,9 +242,9 @@ function icon(name, cls = 'icon') {
 }
 
 /* ---- Derived catalog -----------------------------------------------------
-   OUT and ITEMS are rebuilt (not just computed once) because the catalog can
-   be replaced at runtime once the live Supabase products load in — see
-   loadProductsFromSupabase() near the bottom of this file. */
+   ITEMS stays empty until the live Supabase catalog loads — see
+   loadProductsFromSupabase() near the bottom of this file. The old catalog in
+   data.js is never shown: its names and prices are out of date. */
 
 let OUT = new Set(OUT_OF_STOCK);
 let ITEMS = [];
@@ -259,7 +259,9 @@ function buildItems() {
       console.warn('[glow] no price for "' + p.id + '" — add it to PRICE in data.js');
     }
     const materialFa = MATERIALS[p.material] || p.material || '';
-    const photos = p.photos && p.photos.length ? p.photos : [p.photo_url || 'images/' + p.id + '.jpg'];
+    const photos = (p.photos && p.photos.length ? p.photos : [p.photo_url || 'images/' + p.id + '.jpg']).map(
+      proxiedPhotoUrl
+    );
     return {
       ...p,
       price: price ?? 0,
@@ -280,7 +282,6 @@ function buildItems() {
     };
   });
 }
-buildItems();
 
 const byId = (id) => ITEMS.find((p) => p.id === id);
 
@@ -334,6 +335,7 @@ const state = {
   error: '',
   order: null,
   faqOpen: 0,
+  catalog: 'loading', // 'loading' | 'ready' | 'error' — see loadProductsFromSupabase()
   snappPayOpen: false, // checkout's اسنپ‌پی banner accordion — not persisted, resets each page load
   trackCode: '',
   trackPhone: '',
@@ -1997,12 +1999,38 @@ const TITLES = {
   payment: 'نتیجه‌ی پرداخت — Glow Home',
 };
 
+/** Screens that list or price products: they wait for the live catalog. */
+const CATALOG_SCREENS = new Set([screenHome, screenShop, screenCollection, screenProduct, screenCart, screenCheckout]);
+
+const CATALOG_ERROR =
+  'در حال حاضر دریافت محصولات ممکن نیست. لطفاً اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.';
+
+function screenCatalogStatus() {
+  if (state.catalog === 'error') {
+    return `
+  <div class="shell screen">
+    <div class="empty" style="margin-top:24px" role="alert">
+      <h3 class="section-title">محصولات بارگذاری نشد</h3>
+      <p>${esc(CATALOG_ERROR)}</p>
+      <button class="btn btn-primary" data-act="catalog-retry">تلاش دوباره</button>
+    </div>
+  </div>`;
+  }
+  return `
+  <div class="shell screen">
+    <div class="empty" style="margin-top:24px" role="status">
+      <p>در حال بارگذاری محصولات…</p>
+    </div>
+  </div>`;
+}
+
 /** header() output from the last render. The search box's value is set on
  * the element (not in this HTML), so typing never changes it. */
 let lastChrome = '';
 
 function render() {
-  const body = (SCREENS[state.route] || screenHome)();
+  const screen = SCREENS[state.route] || screenHome;
+  const body = (state.catalog !== 'ready' && CATALOG_SCREENS.has(screen) ? screenCatalogStatus : screen)();
   document.title = TITLES[state.route] || TITLES.home;
 
   const chrome = header();
@@ -2326,6 +2354,11 @@ const ACTIONS = {
     render();
   },
 
+  'catalog-retry': () => {
+    if (state.catalog === 'loading') return;
+    loadProductsFromSupabase();
+  },
+
   'clear-search': () => {
     state.query = '';
     state.filter = 'all';
@@ -2586,62 +2619,96 @@ window.addEventListener('hashchange', onRouteChange);
 onRouteChange();
 
 /* ---- Live catalog from Supabase ------------------------------------------
-   The site renders instantly from the fallback catalog in data.js, then
-   quietly swaps in the live database catalog once it arrives — so a slow or
-   failed connection never leaves the visitor looking at a blank page, it
-   just means they briefly see the last-known catalog instead of the newest
-   one. */
+   Product screens show «در حال بارگذاری محصولات…» until the live catalog
+   arrives. One automatic retry; if both tries fail (or time out), they show
+   CATALOG_ERROR with «تلاش دوباره». Never the old data.js catalog. */
+
+// Per-try time limits: the error shows after 15 s at most.
+const CATALOG_TRY_MS = [10000, 5000];
+const CATALOG_RETRY_PAUSE_MS = 1000;
+
+async function fetchCatalog(sb, timeoutMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const { data, error } = await sb
+      .from('products')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .abortSignal(ctrl.signal);
+    if (error) throw new Error(error.message);
+    if (!data || !data.length) throw new Error('no products');
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function loadProductsFromSupabase() {
+  state.catalog = 'loading';
+  render();
+  let data = null;
   try {
     const sb = getSupabaseClient();
-    const { data, error } = await sb.from('products').select('*').order('sort_order', { ascending: true });
-
-    if (error) {
-      console.warn('[glow] could not load live catalog, using fallback:', error.message);
-      return;
-    }
-    if (!data || !data.length) return; // admin panel is empty so far — keep the fallback catalog
-
-    PRODUCTS = data.map((r) => ({
-      id: r.slug,
-      fa: r.name_fa,
-      // Empty stays empty: no English line rather than a wrong or repeated one.
-      en: String(r.name_en ?? '').trim(),
-      col: r.collection,
-      subcategory: r.subcategory || null,
-      style: r.style || null,
-      variants: Array.isArray(r.variants) ? r.variants : [],
-      colors: Array.isArray(r.colors) ? r.colors : [],
-      height: r.height_cm ?? HEIGHT_UNKNOWN,
-      body_size: String(r.body_size ?? '').trim() || null,
-      shade_size: String(r.shade_size ?? '').trim() || null,
-      material: r.material || '',
-      desc: r.description || '',
-      photo_url: r.photo_url || null,
-      photos: Array.isArray(r.photos) && r.photos.length ? r.photos : null,
-    }));
-    PRICE = Object.fromEntries(data.map((r) => [r.slug, r.price]));
-    PROVISIONAL = Object.fromEntries(data.map((r) => [r.slug, r.price_provisional]));
-    OUT_OF_STOCK = data.filter((r) => !r.in_stock).map((r) => r.slug);
-
-    buildItems();
-    // A product with shade types only accepts keys naming a stored size and
-    // shade (the server rejects anything else), so drop old lines such as
-    // "gisoo::h100" instead of leaving the customer with an order that fails.
-    let dropped = false;
-    for (const key of Object.keys(state.cart)) {
-      const p = byId(parseCartKey(key).id);
-      if (p && hasShadeTypes(p) && !cartLineData(key)) {
-        delete state.cart[key];
-        dropped = true;
+    for (let i = 0; i < CATALOG_TRY_MS.length && !data; i++) {
+      if (i) await new Promise((r) => setTimeout(r, CATALOG_RETRY_PAUSE_MS));
+      try {
+        data = await fetchCatalog(sb, CATALOG_TRY_MS[i]);
+      } catch (e) {
+        console.warn('[glow] live catalog try ' + (i + 1) + ' failed:', e.message);
       }
     }
-    if (dropped) saveStore();
-    render();
   } catch (e) {
-    console.warn('[glow] live catalog fetch failed, using fallback:', e.message);
+    console.warn('[glow] live catalog unavailable:', e.message);
   }
+  if (!data) {
+    state.catalog = 'error';
+    render();
+    return;
+  }
+
+  PRODUCTS = data.map((r) => ({
+    id: r.slug,
+    fa: r.name_fa,
+    // Empty stays empty: no English line rather than a wrong or repeated one.
+    en: String(r.name_en ?? '').trim(),
+    col: r.collection,
+    subcategory: r.subcategory || null,
+    style: r.style || null,
+    variants: Array.isArray(r.variants) ? r.variants : [],
+    colors: Array.isArray(r.colors) ? r.colors : [],
+    height: r.height_cm ?? HEIGHT_UNKNOWN,
+    body_size: String(r.body_size ?? '').trim() || null,
+    shade_size: String(r.shade_size ?? '').trim() || null,
+    material: r.material || '',
+    desc: r.description || '',
+    photo_url: r.photo_url || null,
+    photos: Array.isArray(r.photos) && r.photos.length ? r.photos : null,
+  }));
+  PRICE = Object.fromEntries(data.map((r) => [r.slug, r.price]));
+  PROVISIONAL = Object.fromEntries(data.map((r) => [r.slug, r.price_provisional]));
+  OUT_OF_STOCK = data.filter((r) => !r.in_stock).map((r) => r.slug);
+
+  buildItems();
+  // A product with shade types only accepts keys naming a stored size and
+  // shade (the server rejects anything else), so drop old lines such as
+  // "gisoo::h100" instead of leaving the customer with an order that fails.
+  let dropped = false;
+  for (const key of Object.keys(state.cart)) {
+    const p = byId(parseCartKey(key).id);
+    if (p && hasShadeTypes(p) && !cartLineData(key)) {
+      delete state.cart[key];
+      dropped = true;
+    }
+  }
+  if (dropped) saveStore();
+  // A product page opened before the catalog arrived has no size picked yet.
+  if (state.route === 'product' && state.selectedHeight == null) {
+    const p = byId(state.param);
+    if (p) state.selectedHeight = p.height;
+  }
+  state.catalog = 'ready';
+  render();
 }
 
 loadProductsFromSupabase();

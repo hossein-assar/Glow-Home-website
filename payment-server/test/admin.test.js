@@ -21,14 +21,18 @@ const constSrc = (name) => {
   return m[0];
 };
 
+// supabase-config.js (loaded before admin.js) gives proxiedPhotoUrl.
+const configJs = read('../../supabase-config.js');
 const fns = new Function(
+  'location', 'window',
+  configJs + '\n' +
   [
     'toLatinDigits', 'unformatPrice', 'formatPrice', 'reformatPriceInput',
     'checkPhotoFile', 'fitWithin', 'photoFileName', 'resolvePhotoSrc', 'mainPhoto', 'mainPhotoFields',
   ].map(fnSrc).join('\n') +
     ['PHOTO_TYPES', 'PHOTO_MAX_BYTES', 'PHOTO_MAX_SIDE'].map(constSrc).join('') +
     'return { unformatPrice, formatPrice, reformatPriceInput, checkPhotoFile, fitWithin, photoFileName, resolvePhotoSrc, mainPhoto, mainPhotoFields, PHOTO_MAX_SIDE };'
-)();
+)({ origin: 'https://glow-home.ir' }, {});
 
 // ---- prices -------------------------------------------------------------------
 
@@ -148,12 +152,15 @@ test('file names are safe ASCII: <slug or "product">-<timestamp>.jpg', () => {
   }
 });
 
-test('preview: old relative paths resolve from the site root, URLs stay as they are', () => {
+test('preview: old relative paths resolve from the site root, supabase.co photos load through /sb', () => {
   const { resolvePhotoSrc } = fns;
   assert.equal(resolvePhotoSrc('images/gisoo.jpg'), '/images/gisoo.jpg');
   assert.equal(resolvePhotoSrc('/images/gisoo.jpg'), '/images/gisoo.jpg');
   const url = 'https://sgfoesnpodvwyzlxfhtq.supabase.co/storage/v1/object/public/product-images/gisoo-1.jpg';
-  assert.equal(resolvePhotoSrc(url), url);
+  const proxied = 'https://glow-home.ir/sb/storage/v1/object/public/product-images/gisoo-1.jpg';
+  assert.equal(resolvePhotoSrc(url), proxied);
+  assert.equal(resolvePhotoSrc(proxied), proxied);
+  assert.equal(resolvePhotoSrc('https://example.com/a.jpg'), 'https://example.com/a.jpg');
   assert.equal(resolvePhotoSrc(''), '');
   assert.equal(resolvePhotoSrc(null), '');
 });
