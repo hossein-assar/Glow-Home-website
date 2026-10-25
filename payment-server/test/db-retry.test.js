@@ -8,7 +8,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { createDb, retryOnce, ATTEMPT_MS, RETRY_DELAY_MS, SUPABASE_TIMEOUT_MS } from '../src/db.js';
+import { createDb, deadline, retryOnce, within, ATTEMPT_MS, RETRY_DELAY_MS, SUPABASE_TIMEOUT_MS } from '../src/db.js';
 import { createApp, DEFAULT_TIMEOUTS, DEEP_HEALTH } from '../src/app.js';
 import { startupLogFields } from '../src/config.js';
 
@@ -50,7 +50,7 @@ const OK = {
   'POST order_items': null,
 };
 
-const FAST = { attemptMs: 40, retryDelayMs: 10 };
+const FAST = { attemptMs: 40, retryDelayMs: 10, timeoutMs: 100 }; // timeoutMs: per request (production 10 s)
 const db = (plan) => {
   const fake = fakeSupabase(plan, OK);
   return { ...fake, db: createDb({ supabaseUrl: 'https://glow-home.ir/sb', serviceRoleKey: 'test-key', fetchImpl: fake.fetchImpl, ...FAST }) };
@@ -62,6 +62,45 @@ test('the retry fits inside the 10 s step limit: 4.5 s + 0.5 s + 4.5 s', () => {
   assert.ok(ATTEMPT_MS * 2 + RETRY_DELAY_MS < DEFAULT_TIMEOUTS.stepMs);
   assert.ok(ATTEMPT_MS < SUPABASE_TIMEOUT_MS);
   assert.deepEqual(DEFAULT_TIMEOUTS, { stepMs: 10000, requestMs: 25000 });
+});
+
+// Node 22's test runner cancels a test whose only pending work is an
+// AbortSignal.timeout() timer (it doesn't keep Node running) — that is what
+// happened on the VPS. Every time limit here and in src/ is a normal timer.
+test('no AbortSignal.timeout timers anywhere in the payment server or its tests', async () => {
+  const { readdirSync } = await import('node:fs');
+  for (const dir of ['../src/', './']) {
+    for (const f of readdirSync(new URL(dir, import.meta.url)).filter((n) => n.endsWith('.js'))) {
+      const code = read(dir + f).replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, ''); // comments may mention it
+      assert.doesNotMatch(code, /AbortSignal\.timeout\(/, dir + f);
+    }
+  }
+});
+
+test('deadline / within: a normal timer that aborts with TimeoutError, and is cleared when done', async () => {
+  const d = deadline(20);
+  const reason = await new Promise((r) => d.signal.addEventListener('abort', () => r(d.signal.reason)));
+  assert.equal(reason.name, 'TimeoutError');
+
+  // within() clears its timer as soon as the attempt settles
+  const cleared = [];
+  const realClear = globalThis.clearTimeout;
+  globalThis.clearTimeout = (t) => { cleared.push(t); return realClear(t); };
+  try {
+    assert.equal(await within(async () => 'done', 60000), 'done');
+    await assert.rejects(within(async () => { throw new Error('x'); }, 60000), /x/);
+  } finally {
+    globalThis.clearTimeout = realClear;
+  }
+  assert.equal(cleared.length, 2);
+
+  // a stalled attempt is cut off by within()'s own timer
+  const t0 = Date.now();
+  await assert.rejects(
+    within((signal) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason))), 30),
+    { name: 'TimeoutError' }
+  );
+  assert.ok(Date.now() - t0 < 1000);
 });
 
 test('retryOnce: a second try after the delay, each with its own time limit', async () => {
@@ -132,7 +171,7 @@ test('create_order is NEVER retried: a lost answer must not become a second orde
 
 test('ping is a single small read with no retry', async () => {
   const { db: d, calls } = db({ 'GET products': ['fail'] });
-  await assert.rejects(d.ping(AbortSignal.timeout(1000)), /ping/);
+  await assert.rejects(d.ping(new AbortController().signal), /ping/);
   assert.deepEqual(calls, ['GET products']);
 });
 
@@ -191,8 +230,11 @@ async function app(ping) {
   await new Promise((r) => server.once('listening', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   const get = async (path) => {
-    const res = await fetch(base + path, { signal: AbortSignal.timeout(3000) });
-    return { status: res.status, body: await res.json() };
+    // the test's own limit, on a normal timer (see db.js deadline())
+    return within(async (signal) => {
+      const res = await fetch(base + path, { signal });
+      return { status: res.status, body: await res.json() };
+    }, 3000);
   };
   return { get, logs, pings: () => pings };
 }

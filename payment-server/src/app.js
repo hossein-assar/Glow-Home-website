@@ -129,8 +129,14 @@ export function createApp({ config, db, zarinpal, logger = log, timeouts = DEFAU
   });
   app.get('/health/deep', deepHealthLimiter, async (req, res) => {
     const t0 = Date.now();
+    // withTimeout's timer is a normal (cleared) one; on timeout the read is
+    // aborted too, so it doesn't linger.
+    const ping = new AbortController();
     try {
-      await withTimeout(() => db.ping(AbortSignal.timeout(deepHealth.timeoutMs)), deepHealth.timeoutMs, 'supabase_ping');
+      await withTimeout(() => db.ping(ping.signal), deepHealth.timeoutMs, 'supabase_ping').catch((err) => {
+        ping.abort(err);
+        throw err;
+      });
       const ms = Date.now() - t0;
       res.json({ ok: true, supabase: ms < deepHealth.slowMs ? 'ok' : 'slow', ms });
     } catch (err) {

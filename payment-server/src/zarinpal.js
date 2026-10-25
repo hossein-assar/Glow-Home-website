@@ -48,23 +48,30 @@ export function describeCode(code) {
 
 export function createZarinpalClient({ baseUrl, merchantId, fetchImpl = fetch }) {
   async function post(path, body) {
+    // A plain (cleared) timer, not AbortSignal.timeout(): see deadline() in db.js.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(new DOMException('timeout', 'TimeoutError')), TIMEOUT_MS);
     let res;
-    try {
-      res = await fetchImpl(baseUrl + path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ merchant_id: merchantId, ...body }),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-    } catch (err) {
-      throw new ZarinpalError('network', err.name === 'TimeoutError' ? 'timeout' : 'request failed');
-    }
-
     let json;
     try {
-      json = await res.json();
-    } catch {
-      throw new ZarinpalError('bad_response', `HTTP ${res.status}, non-JSON body`);
+      try {
+        res = await fetchImpl(baseUrl + path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ merchant_id: merchantId, ...body }),
+          signal: ctrl.signal,
+        });
+      } catch (err) {
+        throw new ZarinpalError('network', err.name === 'TimeoutError' ? 'timeout' : 'request failed');
+      }
+
+      try {
+        json = await res.json();
+      } catch {
+        throw new ZarinpalError('bad_response', `HTTP ${res.status}, non-JSON body`);
+      }
+    } finally {
+      clearTimeout(timer);
     }
 
     // Success: { data: { code, ... }, errors: [] }

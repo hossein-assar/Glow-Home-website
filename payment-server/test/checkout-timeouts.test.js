@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { createApp, DEFAULT_TIMEOUTS } from '../src/app.js';
-import { createDb, fetchWithTimeout, SUPABASE_TIMEOUT_MS } from '../src/db.js';
+import { createDb, fetchWithTimeout, within, SUPABASE_TIMEOUT_MS } from '../src/db.js';
 import { ZarinpalError } from '../src/zarinpal.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -72,17 +72,22 @@ async function start({ db: dbOver = {}, zp: zpOver = {}, timeouts = FAST } = {})
   const base = `http://127.0.0.1:${server.address().port}`;
   const checkout = async (items = CART) => {
     const t0 = Date.now();
-    const res = await fetch(base + '/api/checkout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Origin: 'https://glow-home.ir' },
-      body: JSON.stringify({ customer, items, discount_code: null }),
-      signal: AbortSignal.timeout(5000), // the test fails here if the server hangs
-    });
-    return { status: res.status, json: await res.json(), ms: Date.now() - t0 };
+    // the test fails here (TimeoutError) if the server hangs
+    return within(async (signal) => {
+      const res = await fetch(base + '/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://glow-home.ir' },
+        body: JSON.stringify({ customer, items, discount_code: null }),
+        signal,
+      });
+      return { status: res.status, json: await res.json(), ms: Date.now() - t0 };
+    }, 5000);
   };
   const verify = async (q) => {
-    const res = await fetch(base + '/api/verify?' + q, { redirect: 'manual', signal: AbortSignal.timeout(5000) });
-    return { status: res.status, location: res.headers.get('location') };
+    return within(async (signal) => {
+      const res = await fetch(base + '/api/verify?' + q, { redirect: 'manual', signal });
+      return { status: res.status, location: res.headers.get('location') };
+    }, 5000);
   };
   const event = (name) => logs.filter((l) => l[1] === name).map((l) => l[2]);
   return { checkout, verify, orders, calls, logs, event, zarinpal };

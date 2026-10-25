@@ -14,12 +14,42 @@ function check(error, what) {
 // long after nginx (60 s) has given up — a checkout that hangs silently.
 export const SUPABASE_TIMEOUT_MS = 10000;
 
-/** fetch with a hard time limit, keeping any signal supabase-js passes. */
+/**
+ * An AbortSignal that fires after ms with a TimeoutError. Built on a plain
+ * setTimeout, not AbortSignal.timeout(): that one's timer doesn't keep Node
+ * running, so code (or a test) waiting only on it can be cut off on Node 22.
+ * Call clear() as soon as the work is done, so no timer is left behind.
+ */
+export function deadline(ms) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new DOMException(`timed out after ${ms} ms`, 'TimeoutError')), ms);
+  return { signal: ctrl.signal, clear: () => clearTimeout(timer) };
+}
+
+/** Runs attempt(signal) with a deadline of ms; the timer is always cleared. */
+export async function within(attempt, ms) {
+  const d = deadline(ms);
+  try {
+    return await attempt(d.signal);
+  } finally {
+    d.clear();
+  }
+}
+
+/**
+ * fetch with a hard time limit until the response headers arrive, keeping any
+ * signal supabase-js passes (each call's own deadline, below, also covers
+ * reading the body).
+ */
 export function fetchWithTimeout(fetchImpl = fetch, ms = SUPABASE_TIMEOUT_MS) {
-  return (url, options = {}) => {
-    const timeout = AbortSignal.timeout(ms);
-    const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-    return fetchImpl(url, { ...options, signal });
+  return async (url, options = {}) => {
+    const d = deadline(ms);
+    const signal = options.signal ? AbortSignal.any([options.signal, d.signal]) : d.signal;
+    try {
+      return await fetchImpl(url, { ...options, signal });
+    } finally {
+      d.clear();
+    }
   };
 }
 
@@ -43,10 +73,10 @@ export const RETRY_DELAY_MS = 500;
 /** Runs attempt(signal); on any error waits delayMs and runs it once more. */
 export async function retryOnce(attempt, { attemptMs = ATTEMPT_MS, delayMs = RETRY_DELAY_MS } = {}) {
   try {
-    return await attempt(AbortSignal.timeout(attemptMs));
+    return await within(attempt, attemptMs);
   } catch {
     await new Promise((r) => setTimeout(r, delayMs));
-    return attempt(AbortSignal.timeout(attemptMs));
+    return within(attempt, attemptMs);
   }
 }
 
