@@ -248,7 +248,7 @@ function storefront(city) {
   const code = [
     block(appJs),
     appJs.match(/const money = [^\n]*\n/)[0],
-    ...['normalizePersianText', 'totals', 'feeRowsHtml', 'refreshSummaryTotals'].map(fnSrc),
+    ...['normalizePersianText', 'shippingMethodForCity', 'totals', 'feeRowsHtml', 'shipOptionsHtml', 'shipRowHtml', 'shipHintHtml', 'refreshSummaryTotals'].map(fnSrc),
     'return { totals, feeRowsHtml, refreshSummaryTotals };',
   ].join('\n');
   const fns = new Function(
@@ -288,10 +288,7 @@ test('typing the city updates only the fee rows and totals — no re-render', ()
   sf.state.form.city = 'تهران';
   sf.refreshSummaryTotals();
   assert.equal(sf.nodes.fees[0].innerHTML, '');
-  // the #city input handler sets the city and refreshes; it never calls render()
-  const handler = appJs.match(/document\.addEventListener\('input', \(e\) => \{\n  if \(e\.target\.id !== 'city' \|\| state\.route !== 'checkout'\) return;[\s\S]*?\n\}\);\n/)[0];
-  assert.match(handler, /state\.form\.city = e\.target\.value;\n  refreshSummaryTotals\(\);/);
-  assert.doesNotMatch(handler, /render\(\)/);
+  // the #city input handler itself: checkout-city.test.js
   // cart, checkout and the mobile bar all carry the hooks
   assert.equal((appJs.match(/<div data-sum="fees">\$\{feeRowsHtml\(t\)\}<\/div>/g) || []).length, 2);
   assert.equal((appJs.match(/data-sum="total">\$\{money\(t\.total\)\}/g) || []).length, 3);

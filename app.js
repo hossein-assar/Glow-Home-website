@@ -594,11 +594,49 @@ function feeRowsHtml(t) {
   return t.fees.map((f) => `<div class="sum-row"><span>${esc(f.label)}</span><span>${money(f.amount)}</span></div>`).join('');
 }
 
-/** Updates only the fee rows and totals of the visible summaries (data-sum),
- * so the city field can change the bill while it is being typed in without
- * re-rendering the form. */
+/** Checkout «روش ارسال»: every courier, the one the city forces selected.
+ * The forced method (see shippingMethodForCity) is the only one selectable
+ * once a city is entered — everything else is disabled rather than removed,
+ * so it's clear *why* it's not an option instead of it just vanishing. */
+function shipOptionsHtml(f) {
+  const forced = shippingMethodForCity(f.city);
+  return `${
+    !f.city.trim()
+      ? `<div class="ship-hint" style="margin-top:0;margin-bottom:14px">روش ارسال بر اساس شهری که انتخاب می‌کنید تعیین می‌شود.</div>`
+      : ''
+  }
+          <div class="option-stack">
+            ${SHIPPING.map((s) => {
+              const eligible = !forced || s.id === forced;
+              const whyNot = s.id === 'peyk' ? 'فقط برای تهران' : 'فقط برای شهرهای غیر از تهران';
+              return `
+              <button class="option" data-act="ship" data-id="${s.id}" role="radio" aria-checked="${state.ship === s.id}" ${eligible ? '' : 'disabled'}>
+                <div><b>${esc(s.label)}</b><span>${esc(eligible ? s.note : s.note + ' — ' + whyNot)}</span></div>
+                <span class="opt-end">${s.payAtDoor ? 'پس‌کرایه' : money(s.cost)}</span>
+              </button>`;
+            }).join('')}
+          </div>`;
+}
+
+/** Checkout summary «ارسال» row. */
+function shipRowHtml(t) {
+  return `<div class="sum-row"><span>ارسال</span><span class="${t.freeShip ? 'sage' : ''}">${esc(t.shipLabel)}</span></div>`;
+}
+
+/** The note under the checkout total: who collects the courier's fee. */
+function shipHintHtml(t) {
+  return t.method.payAtDoor ? `<div class="ship-hint">هزینه‌ی ${esc(t.method.label)} جداگانه هنگام تحویل پرداخت می‌شود.</div>` : '';
+}
+
+/** Updates only the parts of the visible summaries that follow the city
+ * (data-sum: couriers, shipping row, hint, fee rows, totals), so the city
+ * field can change them while it is being typed in without re-rendering
+ * the form or moving the cursor. */
 function refreshSummaryTotals() {
   const t = totals();
+  $$('[data-sum="ship-options"]').forEach((el) => (el.innerHTML = shipOptionsHtml(state.form)));
+  $$('[data-sum="ship-row"]').forEach((el) => (el.innerHTML = shipRowHtml(t)));
+  $$('[data-sum="ship-hint"]').forEach((el) => (el.innerHTML = shipHintHtml(t)));
   $$('[data-sum="fees"]').forEach((el) => (el.innerHTML = feeRowsHtml(t)));
   $$('[data-sum="total"]').forEach((el) => (el.textContent = money(t.total)));
 }
@@ -1668,27 +1706,7 @@ function screenCheckout() {
 
         <section class="checkout-step">
           <h3>روش ارسال</h3>
-          ${
-            !f.city.trim()
-              ? `<div class="ship-hint" style="margin-top:0;margin-bottom:14px">روش ارسال بر اساس شهری که انتخاب می‌کنید تعیین می‌شود.</div>`
-              : ''
-          }
-          <div class="option-stack">
-            ${SHIPPING.map((s) => {
-              // The forced method (see shippingMethodForCity) is the only one
-              // selectable once a city is entered — everything else is
-              // disabled rather than removed, so it's clear *why* it's not
-              // an option instead of it just vanishing.
-              const forced = shippingMethodForCity(f.city);
-              const eligible = !forced || s.id === forced;
-              const whyNot = s.id === 'peyk' ? 'فقط برای تهران' : 'فقط برای شهرهای غیر از تهران';
-              return `
-              <button class="option" data-act="ship" data-id="${s.id}" role="radio" aria-checked="${state.ship === s.id}" ${eligible ? '' : 'disabled'}>
-                <div><b>${esc(s.label)}</b><span>${esc(eligible ? s.note : s.note + ' — ' + whyNot)}</span></div>
-                <span class="opt-end">${s.payAtDoor ? 'پس‌کرایه' : money(s.cost)}</span>
-              </button>`;
-            }).join('')}
-          </div>
+          <div data-sum="ship-options">${shipOptionsHtml(f)}</div>
         </section>
 
         <section class="checkout-step">
@@ -1730,16 +1748,10 @@ function screenCheckout() {
               )}</span></div>`
             : ''
         }
-        <div class="sum-row"><span>ارسال</span><span class="${t.freeShip ? 'sage' : ''}">${esc(
-    t.shipLabel
-  )}</span></div>
+        <div data-sum="ship-row">${shipRowHtml(t)}</div>
         <div data-sum="fees">${feeRowsHtml(t)}</div>
         <div class="sum-row total"><span>قابل پرداخت</span><span data-sum="total">${money(t.total)}</span></div>
-        ${
-          t.method.payAtDoor
-            ? `<div class="ship-hint">هزینه‌ی ${esc(t.method.label)} جداگانه هنگام تحویل پرداخت می‌شود.</div>`
-            : ''
-        }
+        <div data-sum="ship-hint">${shipHintHtml(t)}</div>
         ${state.error ? `<div class="alert alert-error">${esc(state.error)}</div>` : ''}
         <button class="btn btn-accent btn-block" style="margin-top:18px" data-act="place-order" ${
           state.placingOrder ? 'disabled' : ''
@@ -2741,12 +2753,18 @@ document.addEventListener('input', (e) => {
   }
 });
 
-// The city (شهرستان) decides the packaging fee: update the summary as it is
-// typed, without re-rendering the form. Validation and the shipping method
-// still follow on leaving the field (focusout above).
+// The city (شهرستان) decides the courier and the packaging fee: follow it as
+// it is typed, without re-rendering the form. A «نام شهر را وارد کنید.» error
+// goes as soon as the field has a value; an emptied field only shows it again
+// when it is left (focusout above).
 document.addEventListener('input', (e) => {
   if (e.target.id !== 'city' || state.route !== 'checkout') return;
   state.form.city = e.target.value;
+  syncShippingToCity();
+  if (state.formErrors.city && !FIELD_VALIDATORS.city(state.form)) {
+    state.formErrors.city = '';
+    e.target.closest('.field')?.querySelector('.field-error')?.remove();
+  }
   refreshSummaryTotals();
 });
 
