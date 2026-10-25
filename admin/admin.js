@@ -444,7 +444,7 @@ function rowHtml(p) {
   return `
     <tr data-id="${p.id}">
       <td>
-        <div style="font-weight:600">${escapeHtml(p.name_fa)}</div>
+        <div style="font-weight:600" id="name-${p.id}">${escapeHtml(p.name_fa)}</div>
         <div style="color:#8a7d6e; font-size:12px">${escapeHtml(p.slug)}</div>
         <button class="link-btn" id="toggle-${p.id}" style="padding:2px 0">ویرایش کامل ▾</button>
       </td>
@@ -469,6 +469,17 @@ function editPanelHtml(p) {
   return `
     <tr class="edit-row" id="edit-row-${p.id}">
       <td colspan="7">
+        <div class="edit-grid" style="margin-bottom:10px">
+          <div>
+            <label>نام فارسی</label>
+            <input id="f-name-fa-${p.id}" value="${escapeAttr(p.name_fa || '')}">
+          </div>
+          <div>
+            <label>نام انگلیسی (اختیاری)</label>
+            <input id="f-name-en-${p.id}" dir="ltr" value="${escapeAttr(p.name_en || '')}">
+          </div>
+          <div></div>
+        </div>
         <div class="edit-grid">
           <div>
             <label>زیردسته (جنس بدنه)</label>
@@ -624,6 +635,15 @@ async function saveProductFull(id) {
     msg.className = 'msg error';
     return;
   }
+  const name_fa = document.getElementById(`f-name-fa-${id}`).value.trim();
+  // Empty English name is stored as null: the shop then shows no English line.
+  const name_en = document.getElementById(`f-name-en-${id}`).value.trim() || null;
+  if (!name_fa) {
+    msg.textContent = 'خطا: نام فارسی را وارد کنید.';
+    msg.className = 'msg error';
+    return;
+  }
+
   msg.textContent = 'در حال ذخیره...';
   msg.className = 'msg';
 
@@ -687,7 +707,7 @@ async function saveProductFull(id) {
     return;
   }
 
-  const fields = { subcategory, style, material, height_cm, description, colors, variants };
+  const fields = { name_fa, name_en, subcategory, style, material, height_cm, description, colors, variants };
   if (basePrice != null) fields.price = basePrice;
   const photoFields = mainPhotoFields(cachedRow || {}, photoPath);
   if (photoFields) Object.assign(fields, photoFields);
@@ -711,6 +731,8 @@ async function saveProductFull(id) {
   // reloading would collapse this panel immediately, hiding the very
   // confirmation message we're about to show.
   if (cachedRow) Object.assign(cachedRow, fields);
+  const nameCell = document.getElementById(`name-${id}`);
+  if (nameCell) nameCell.textContent = name_fa;
 
   msg.textContent = 'ذخیره شد.';
   msg.className = 'msg ok';

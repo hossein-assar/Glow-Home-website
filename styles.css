@@ -706,13 +706,6 @@ button.media.gallery-cover {
   font-size: 13px;
 }
 
-.media-fallback .fb-latin {
-  font-family: var(--font-latin);
-  direction: ltr;
-  font-size: clamp(17px, 2.4vw, 23px);
-  line-height: 1.2;
-  color: var(--fallback-ink, var(--color-neutral-600));
-}
 .media-fallback .fb-fa { font-size: 14px; font-weight: 500; color: var(--color-neutral-700); }
 .media-fallback .fb-note {
   margin-top: 6px;
@@ -781,11 +774,23 @@ button.media.gallery-cover {
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
   cursor: pointer;
 }
-.card-title-row .latin-name { font-size: 14.5px; white-space: nowrap; }
-.card-name { font-size: 16.5px; font-weight: 700; }
-.card-meta { font-size: 13.5px; color: var(--color-neutral-600); }
+/* Long names wrap inside the card instead of running into the next one;
+   the English line stops at two lines. */
+.card-title-row .latin-name {
+  font-size: 14.5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.card-name { font-size: 16.5px; font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+.card-meta { font-size: 13.5px; color: var(--color-neutral-600); overflow-wrap: anywhere; }
 .card-price { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; margin-bottom: 12px; }
 .card-price b { font-size: 16px; font-weight: 700; }
 
@@ -999,6 +1004,8 @@ button.media.gallery-cover {
   align-items: start;
 }
 .product .media { aspect-ratio: 4 / 5; }
+.product > * { min-width: 0; }
+.product .page-title, .product .latin-name { overflow-wrap: anywhere; }
 
 .crumbs { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--color-neutral-600); margin-bottom: 18px; flex-wrap: wrap; }
 .crumbs button { background: none; border: 0; cursor: pointer; color: inherit; font-size: inherit; padding: 0; }
@@ -1048,7 +1055,7 @@ button.media.gallery-cover {
 
 .cart-row {
   display: grid;
-  grid-template-columns: 84px 1fr auto;
+  grid-template-columns: 84px minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
   padding: 18px 0;
@@ -1056,10 +1063,10 @@ button.media.gallery-cover {
 }
 .cart-row .media { width: 84px; height: 84px; border-radius: var(--radius-md); cursor: pointer; }
 .cart-row .media-fallback { padding: 4px; }
-.cart-row .media-fallback .fb-fa, .cart-row .media-fallback .fb-note { display: none; }
-.cart-row .media-fallback .fb-latin { font-size: 13px; }
-.cart-row b { font-size: 16px; font-weight: 700; cursor: pointer; }
-.cart-row .cart-meta { font-size: 13px; color: var(--color-neutral-600); }
+.cart-row .media-fallback .fb-note { display: none; }
+.cart-row .media-fallback .fb-fa { font-size: 12px; }
+.cart-row b { font-size: 16px; font-weight: 700; cursor: pointer; overflow-wrap: anywhere; }
+.cart-row .cart-meta { font-size: 13px; color: var(--color-neutral-600); overflow-wrap: anywhere; }
 .cart-row-end { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 
 .link-danger {
@@ -1501,7 +1508,7 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
   .footer-grid { grid-template-columns: 1fr 1fr; gap: 26px; }
   .footer { margin-bottom: 0; }
 
-  .cart-row { grid-template-columns: 68px 1fr; }
+  .cart-row { grid-template-columns: 68px minmax(0, 1fr); }
   .cart-row .media { width: 68px; height: 68px; }
   .cart-row-end { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; }
 

@@ -646,7 +646,6 @@ function media(p, extraClass = '') {
     `<div class="media col-${p.col} ${extraClass}">` +
     `<img src="${esc(p.img)}" alt="${esc(p.fa)}" loading="lazy">` +
     `<div class="media-fallback">` +
-    `<span class="fb-latin">${esc(p.en)}</span>` +
     `<span class="fb-fa">${esc(p.fa)}</span>` +
     `<span class="fb-note">عکس به‌زودی</span>` +
     `</div></div>`
@@ -664,7 +663,6 @@ function gallery(p) {
     <button class="media col-${p.col} gallery-cover" data-act="open-lightbox" data-id="${p.id}" data-index="0" aria-label="بزرگ‌نمایی عکس">
       <img src="${esc(photos[0])}" alt="${esc(p.fa)}" loading="lazy">
       <div class="media-fallback">
-        <span class="fb-latin">${esc(p.en)}</span>
         <span class="fb-fa">${esc(p.fa)}</span>
         <span class="fb-note">عکس به‌زودی</span>
       </div>
@@ -959,7 +957,7 @@ function card(p) {
       <div class="card-body">
         <div class="card-title-row" data-act="open" data-id="${p.id}">
           <span class="card-name">${esc(p.fa)}</span>
-          <span class="latin-name">${esc(p.en)}</span>
+          ${p.en ? `<span class="latin-name">${esc(p.en)}</span>` : ''}
         </div>
         <span class="card-meta">${esc(p.meta)}${p.variants && p.variants.length ? ' · چند اندازه' : ''}</span>
         <div class="card-price">
@@ -1257,7 +1255,7 @@ function screenProduct() {
       <div>${gallery(p)}</div>
       <div>
         <h1 class="page-title">${esc(p.fa)}</h1>
-        <div class="latin-name" style="font-size:19px;margin-top:4px">${esc(p.en)}</div>
+        ${p.en ? `<div class="latin-name" style="font-size:19px;margin-top:4px">${esc(p.en)}</div>` : ''}
 
         <div class="price-row">
           <b>${effectivePriceFa}</b>
@@ -2608,7 +2606,8 @@ async function loadProductsFromSupabase() {
     PRODUCTS = data.map((r) => ({
       id: r.slug,
       fa: r.name_fa,
-      en: r.name_en || r.name_fa,
+      // Empty stays empty: no English line rather than a wrong or repeated one.
+      en: String(r.name_en ?? '').trim(),
       col: r.collection,
       subcategory: r.subcategory || null,
       style: r.style || null,
