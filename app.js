@@ -2046,6 +2046,9 @@ function screenCatalogStatus() {
 /** header() output from the last render. The search box's value is set on
  * the element (not in this HTML), so typing never changes it. */
 let lastChrome = '';
+/** True while render() replaces the page. Removing a focused field makes
+ * Chrome fire focusout on it; the focusout handler ignores those. */
+let rendering = false;
 
 function render() {
   const screen = SCREENS[state.route] || screenHome;
@@ -2057,27 +2060,32 @@ function render() {
   const app = $('#app');
   const head = $('#app > header');
   const box = document.getElementById('q');
-  if (head && box && chrome === lastChrome) {
-    // Header unchanged: leave it — and the search input — in place, so the
-    // input keeps focus, caret and any IME composition while typing.
-    while (head.nextSibling) head.nextSibling.remove();
-    head.insertAdjacentHTML('afterend', rest);
-    if (box.value !== state.query) box.value = state.query;
-  } else {
-    // The header itself changed (cart badge, menu): rebuild everything, and
-    // put focus and caret back if the search box had them.
-    const focused = box && document.activeElement === box;
-    const start = focused ? box.selectionStart : null;
-    const end = focused ? box.selectionEnd : null;
-    app.innerHTML = chrome + rest;
-    const fresh = document.getElementById('q');
-    if (fresh) {
-      fresh.value = state.query;
-      if (focused) {
-        fresh.focus();
-        if (start !== null) fresh.setSelectionRange(start, end);
+  rendering = true;
+  try {
+    if (head && box && chrome === lastChrome) {
+      // Header unchanged: leave it — and the search input — in place, so the
+      // input keeps focus, caret and any IME composition while typing.
+      while (head.nextSibling) head.nextSibling.remove();
+      head.insertAdjacentHTML('afterend', rest);
+      if (box.value !== state.query) box.value = state.query;
+    } else {
+      // The header itself changed (cart badge, menu): rebuild everything, and
+      // put focus and caret back if the search box had them.
+      const focused = box && document.activeElement === box;
+      const start = focused ? box.selectionStart : null;
+      const end = focused ? box.selectionEnd : null;
+      app.innerHTML = chrome + rest;
+      const fresh = document.getElementById('q');
+      if (fresh) {
+        fresh.value = state.query;
+        if (focused) {
+          fresh.focus();
+          if (start !== null) fresh.setSelectionRange(start, end);
+        }
       }
     }
+  } finally {
+    rendering = false;
   }
   lastChrome = chrome;
 
@@ -2128,6 +2136,9 @@ function syncForm() {
 }
 
 function placeOrder() {
+  // Already submitting: a second click (or tap on the other pay button) does
+  // nothing at all — it can never start a second order.
+  if (state.placingOrder) return;
   syncForm();
   const t = totals();
   const f = state.form;
@@ -2147,8 +2158,6 @@ function placeOrder() {
     if (state.error) $('.alert-error')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     return;
   }
-
-  if (state.placingOrder) return; // already submitting — ignore a double-click
 
   // Reconstruct the full number from the fixed "+98" the UI shows plus the
   // bare digits the customer typed — same "fixed prefix, customer only
@@ -2580,6 +2589,64 @@ document.addEventListener('change', (e) => {
   }
 });
 
+/* ---- No re-render during a press ------------------------------------------
+   A click only fires when the button released is the one pressed. Leaving a
+   checkout field by pressing «پرداخت آنلاین» blurs the field first, and its
+   focusout re-render used to replace the button between press and release:
+   the first click did nothing, the second worked. While a press (mouse, touch
+   or pen) is in progress, renderWhenIdle() only notes that a render is due;
+   it runs right after that press's click (or 1 s later if no click comes),
+   so the click always lands on the button that was pressed. */
+const PRESS_FALLBACK_MS = 1000;
+let pressActive = false;
+let pressTimer = null;
+let renderPending = false;
+
+function endPress() {
+  if (!pressActive) return;
+  pressActive = false;
+  clearTimeout(pressTimer);
+  if (!renderPending) return;
+  renderPending = false;
+  // The press may have moved focus to another field: keep what's typed
+  // there, and keep it focused (with its caret) after the render.
+  syncForm();
+  const active = document.activeElement;
+  const id = active && active.id;
+  const caret = id && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
+  render();
+  const el = id && document.getElementById(id);
+  if (el && el !== document.activeElement) {
+    el.focus();
+    if (caret) {
+      try {
+        el.setSelectionRange(caret[0], caret[1]);
+      } catch {
+        /* inputs like <select> have no caret */
+      }
+    }
+  }
+}
+
+function renderWhenIdle() {
+  if (pressActive) renderPending = true;
+  else render();
+}
+
+document.addEventListener(
+  'pointerdown',
+  () => {
+    pressActive = true;
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(endPress, PRESS_FALLBACK_MS);
+  },
+  true
+);
+// Capture phase: runs before the click's action; the pending render waits
+// until after it.
+document.addEventListener('click', () => setTimeout(endPress, 0), true);
+document.addEventListener('pointercancel', endPress, true);
+
 // Live, per-field checkout validation (point 4): runs each field's check
 // the moment the customer leaves it, same "react on leaving the field, not
 // on every keystroke" idea already used for شهر above. 'focusout' (unlike
@@ -2588,6 +2655,10 @@ document.addEventListener('change', (e) => {
 // 'change' alone would silently miss that case.
 document.addEventListener('focusout', (e) => {
   if (state.route !== 'checkout') return;
+  // Chrome also fires focusout on a focused field that render() removes.
+  // That is not the customer leaving the field: re-rendering for it would
+  // replace the page again and throw away the focus just restored.
+  if (rendering) return;
   const id = e.target.id;
   if (!['name', 'phone', 'city', 'address', 'postcode'].includes(id)) return;
   // phone/postcode show live-formatted spaces (applyDigitGrouping) — strip
@@ -2595,7 +2666,7 @@ document.addEventListener('focusout', (e) => {
   state.form[id] = id === 'phone' || id === 'postcode' ? e.target.value.replace(/\s+/g, '') : e.target.value;
   validateCheckoutField(id);
   if (id === 'city') syncShippingToCity();
-  render();
+  renderWhenIdle(); // not render(): see "No re-render during a press" above
 });
 
 // Live digit-group formatting for the +98-prefixed phone fields and کد
