@@ -47,7 +47,8 @@ const PRICES = [
   ['h100', 'embroidered', 11600000],
 ];
 
-const price = (cartKey, qty = 1) => priceCart({ items: [{ cartKey, qty }], products, discountCode: null, city: 'شیراز' });
+// Tehran: product prices only (the packaging fee outside Tehran: city-fees.test.js)
+const price = (cartKey, qty = 1) => priceCart({ items: [{ cartKey, qty }], products, discountCode: null, city: 'تهران' });
 const ordersLine = (cartKey) => {
   const { height, shade } = orders.parseCartKey(cartKey);
   return orders.shadeLine(gisoo, height, shade);

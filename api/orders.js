@@ -97,10 +97,43 @@ function normalizePersianText(s) {
     .replace(/ك/g, 'ک');
 }
 
+// ---- City fees (shared rule) -------------------------------------------------
+// ⚠ This block is identical in app.js, api/orders.js and
+// payment-server/src/pricing.js (`npm test` in payment-server/ checks it).
+// Amounts in Toman. Outside Tehran every order carries the packaging fee, on
+// the bill (the free-shipping threshold never waives it); delivery itself
+// stays pay-at-door. Each fee is stored as its own order line (order_items,
+// no product). Outside Tehran the courier is always Tipax, so
+// TIPAX_EXTRA_FEE_TOMAN applies to the same orders — it is OFF (0) until
+// confirmed; a fee of 0 adds no line.
+const PACKAGING_FEE_TOMAN = 250000;
+const TIPAX_EXTRA_FEE_TOMAN = 0;
+const PACKAGING_FEE_LABEL = 'هزینه بسته‌بندی';
+const TIPAX_EXTRA_FEE_LABEL = 'هزینه اضافه تیپاکس';
+const TEHRAN_NAMES = ['تهران', 'tehran', 'teheran'];
+
+/** True for «تهران» in any spelling the city field can hold: ي/ك variants,
+ * extra spaces, half-spaces, «Tehran», «شهر تهران», «تهران - ونک»,
+ * «تهران، ونک», «تهران (ونک)». */
+function isTehranCity(rawCity) {
+  const city = normalizePersianText(rawCity).toLowerCase().replace(/^شهر\s+/, '');
+  return TEHRAN_NAMES.includes(city.split(/\s*[-–—,،(/]\s*/)[0].trim());
+}
+
+/** The fees a city adds to the bill, as [{ label, amount }]. None for
+ * Tehran, and none for an empty city (both servers reject an empty city). */
+function cityFees(rawCity) {
+  if (!normalizePersianText(rawCity) || isTehranCity(rawCity)) return [];
+  const fees = [{ label: PACKAGING_FEE_LABEL, amount: PACKAGING_FEE_TOMAN }];
+  if (TIPAX_EXTRA_FEE_TOMAN > 0) fees.push({ label: TIPAX_EXTRA_FEE_LABEL, amount: TIPAX_EXTRA_FEE_TOMAN });
+  return fees;
+}
+// ---- end of city fees ----------------------------------------------------------
+
 // The only source of truth for which method an order gets — the client's
 // own shipping_method choice is never trusted (see the call site below).
 function shippingMethodForCity(rawCity) {
-  return normalizePersianText(rawCity) === 'تهران' ? 'peyk' : 'tipax';
+  return isTehranCity(rawCity) ? 'peyk' : 'tipax';
 }
 
 function parseCartKey(key) {
@@ -348,7 +381,11 @@ module.exports = async (req, res) => {
   const method = SHIPPING[resolvedShippingMethod];
   const freeShip = !method.payAtDoor && base >= FREE_SHIP_OVER;
   const shipCost = method.payAtDoor || freeShip ? 0 : method.cost;
-  const total = base + shipCost;
+  // City fees (packaging outside Tehran) from the city alone — nothing the
+  // client sends about fees is read. Each is stored as its own order line.
+  const fees = cityFees(city);
+  for (const f of fees) orderItems.push({ product_id: null, name_fa: f.label, qty: 1, unit_price: f.amount });
+  const total = base + shipCost + fees.reduce((sum, f) => sum + f.amount, 0);
 
   // ---- Order code (clean sequential number, guaranteed unique) -----------
   const { data: seqData, error: seqErr } = await sb.rpc('nextval_order_code');

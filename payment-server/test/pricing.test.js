@@ -55,7 +55,7 @@ test('prices from DB with variant, color, discount; shipping never charged', () 
 test('unknown / prototype discount codes are ignored', () => {
   for (const code of ['NOPE', 'constructor', '__proto__', 'GLOW10', 'HANDMADE15']) {
     const r = priceCart({ items: [{ cartKey: 'lamp-a', qty: 1 }], products, discountCode: code, city: 'شیراز' });
-    assert.equal(r.total, 1000000);
+    assert.equal(r.total, 1000000 + 250000); // + packaging fee outside Tehran, never discounted
     assert.equal(r.discountCode, null);
     assert.equal(r.shippingMethod, 'tipax');
   }

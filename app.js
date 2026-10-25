@@ -81,6 +81,39 @@ function normalizePersianText(s) {
     .replace(/ك/g, 'ک');
 }
 
+// ---- City fees (shared rule) -------------------------------------------------
+// ⚠ This block is identical in app.js, api/orders.js and
+// payment-server/src/pricing.js (`npm test` in payment-server/ checks it).
+// Amounts in Toman. Outside Tehran every order carries the packaging fee, on
+// the bill (the free-shipping threshold never waives it); delivery itself
+// stays pay-at-door. Each fee is stored as its own order line (order_items,
+// no product). Outside Tehran the courier is always Tipax, so
+// TIPAX_EXTRA_FEE_TOMAN applies to the same orders — it is OFF (0) until
+// confirmed; a fee of 0 adds no line.
+const PACKAGING_FEE_TOMAN = 250000;
+const TIPAX_EXTRA_FEE_TOMAN = 0;
+const PACKAGING_FEE_LABEL = 'هزینه بسته‌بندی';
+const TIPAX_EXTRA_FEE_LABEL = 'هزینه اضافه تیپاکس';
+const TEHRAN_NAMES = ['تهران', 'tehran', 'teheran'];
+
+/** True for «تهران» in any spelling the city field can hold: ي/ك variants,
+ * extra spaces, half-spaces, «Tehran», «شهر تهران», «تهران - ونک»,
+ * «تهران، ونک», «تهران (ونک)». */
+function isTehranCity(rawCity) {
+  const city = normalizePersianText(rawCity).toLowerCase().replace(/^شهر\s+/, '');
+  return TEHRAN_NAMES.includes(city.split(/\s*[-–—,،(/]\s*/)[0].trim());
+}
+
+/** The fees a city adds to the bill, as [{ label, amount }]. None for
+ * Tehran, and none for an empty city (both servers reject an empty city). */
+function cityFees(rawCity) {
+  if (!normalizePersianText(rawCity) || isTehranCity(rawCity)) return [];
+  const fees = [{ label: PACKAGING_FEE_LABEL, amount: PACKAGING_FEE_TOMAN }];
+  if (TIPAX_EXTRA_FEE_TOMAN > 0) fees.push({ label: TIPAX_EXTRA_FEE_LABEL, amount: TIPAX_EXTRA_FEE_TOMAN });
+  return fees;
+}
+// ---- end of city fees ----------------------------------------------------------
+
 /** The /track order-code field only ever asks for the part after "GH-" —
  * this reconstructs the canonical GH-XXXX form the backend expects. Only
  * whitespace and a leading GH-/gh- prefix are stripped, NOT letters:
@@ -477,9 +510,8 @@ function cardCartKey(p) {
  * Tehran, 'tipax' for anywhere else, or null if city isn't filled in yet
  * (nothing forced until then). See PROJECT_CONTEXT.md's shipping note. */
 function shippingMethodForCity(rawCity) {
-  const city = normalizePersianText(rawCity);
-  if (!city) return null;
-  return city === 'تهران' ? 'peyk' : 'tipax';
+  if (!normalizePersianText(rawCity)) return null;
+  return isTehranCity(rawCity) ? 'peyk' : 'tipax';
 }
 
 /** Keep state.ship in lock-step with whatever shippingMethodForCity(city)
@@ -550,7 +582,25 @@ function totals() {
   else if (freeShip) shipLabel = 'رایگان';
   else shipLabel = money(method.cost);
 
-  return { rows, subtotal, discount, base, method, freeShip, shipCost, shipLabel, total: base + shipCost };
+  // Outside Tehran: the packaging fee (see cityFees), always on the bill.
+  const fees = cityFees(state.form.city);
+  const feeTotal = fees.reduce((sum, f) => sum + f.amount, 0);
+
+  return { rows, subtotal, discount, base, method, freeShip, shipCost, shipLabel, fees, total: base + shipCost + feeTotal };
+}
+
+/** The «هزینه بسته‌بندی» row(s) of a summary — empty for Tehran or no city. */
+function feeRowsHtml(t) {
+  return t.fees.map((f) => `<div class="sum-row"><span>${esc(f.label)}</span><span>${money(f.amount)}</span></div>`).join('');
+}
+
+/** Updates only the fee rows and totals of the visible summaries (data-sum),
+ * so the city field can change the bill while it is being typed in without
+ * re-rendering the form. */
+function refreshSummaryTotals() {
+  const t = totals();
+  $$('[data-sum="fees"]').forEach((el) => (el.innerHTML = feeRowsHtml(t)));
+  $$('[data-sum="total"]').forEach((el) => (el.textContent = money(t.total)));
 }
 
 /** Returns false (and adds nothing) for a product with shade types when the
@@ -1466,7 +1516,8 @@ function screenCart() {
         <div class="sum-row"><span>ارسال (${esc(t.method.label)})</span><span class="${
     t.freeShip ? 'sage' : ''
   }">${esc(t.shipLabel)}</span></div>
-        <div class="sum-row total"><span>قابل پرداخت</span><span>${money(t.total)}</span></div>
+        <div data-sum="fees">${feeRowsHtml(t)}</div>
+        <div class="sum-row total"><span>قابل پرداخت</span><span data-sum="total">${money(t.total)}</span></div>
 
         <div class="ship-hint">${
           t.method.payAtDoor
@@ -1682,7 +1733,8 @@ function screenCheckout() {
         <div class="sum-row"><span>ارسال</span><span class="${t.freeShip ? 'sage' : ''}">${esc(
     t.shipLabel
   )}</span></div>
-        <div class="sum-row total"><span>قابل پرداخت</span><span>${money(t.total)}</span></div>
+        <div data-sum="fees">${feeRowsHtml(t)}</div>
+        <div class="sum-row total"><span>قابل پرداخت</span><span data-sum="total">${money(t.total)}</span></div>
         ${
           t.method.payAtDoor
             ? `<div class="ship-hint">هزینه‌ی ${esc(t.method.label)} جداگانه هنگام تحویل پرداخت می‌شود.</div>`
@@ -1706,7 +1758,7 @@ function screenCheckout() {
   </div>
 
   <div class="action-bar">
-    <div class="ab-info"><b>${money(t.total)}</b>قابل پرداخت</div>
+    <div class="ab-info"><b data-sum="total">${money(t.total)}</b>قابل پرداخت</div>
     <button class="btn btn-accent" data-act="place-order" ${state.placingOrder ? 'disabled' : ''}>${
     isOnlinePayment()
       ? state.placingOrder ? 'در حال انتقال…' : 'پرداخت آنلاین'
@@ -2687,6 +2739,15 @@ document.addEventListener('input', (e) => {
     state.form.postcode = applyDigitGrouping(e.target, [5, 5], e.inputType);
     return;
   }
+});
+
+// The city (شهرستان) decides the packaging fee: update the summary as it is
+// typed, without re-rendering the form. Validation and the shipping method
+// still follow on leaving the field (focusout above).
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'city' || state.route !== 'checkout') return;
+  state.form.city = e.target.value;
+  refreshSummaryTotals();
 });
 
 // Live search from the header, on every screen. render() leaves the header

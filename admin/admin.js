@@ -1110,6 +1110,7 @@ async function loadOrdersSummary() {
     .from('order_items')
     .select('name_fa, qty, orders!inner(status)')
     .not('orders.status', 'in', `(${NOT_COUNTED_STATUSES.join(',')})`)
+    .not('product_id', 'is', null) // fee lines (هزینه بسته‌بندی) are not products
     .limit(5000);
 
   const qtyByName = {};

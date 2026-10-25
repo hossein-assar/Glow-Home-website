@@ -120,7 +120,7 @@ async function postOrder(items, products = [mahtab]) {
       {
         method: 'POST',
         body: {
-          customer: { name: 'سارا', phone: '+989121234567', city: 'شیراز', address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' },
+          customer: { name: 'سارا', phone: '+989121234567', city: 'تهران', address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' },
           items,
           total: 1,
         },
@@ -133,12 +133,12 @@ async function postOrder(items, products = [mahtab]) {
   return { status, json, items: inserted.order_items, selected };
 }
 
-const customer = { name: 'سارا', phone: '+989121234567', city: 'شیراز', address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' };
+const customer = { name: 'سارا', phone: '+989121234567', city: 'تهران', address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' };
 /** payment-server: the same validate + price pair its /api/checkout runs. */
 function payServer(items, products = [mahtab]) {
   const v = validateCheckoutBody({ customer, items, total: 1 });
   assert.equal(v.error, undefined);
-  return priceCart({ items: v.value.items, products, discountCode: null, city: 'شیراز' });
+  return priceCart({ items: v.value.items, products, discountCode: null, city: 'تهران' });
 }
 
 for (const [height, toman] of [[40, 3500000], [50, 4000000]]) {
