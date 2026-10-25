@@ -1,7 +1,7 @@
 // Entry point: node src/server.js (pm2: ecosystem.config.cjs).
 
 import { createApp, log } from './app.js';
-import { loadConfig } from './config.js';
+import { loadConfig, startupLogFields } from './config.js';
 import { createDb } from './db.js';
 import { createZarinpalClient } from './zarinpal.js';
 
@@ -22,5 +22,5 @@ const app = createApp({
 
 // Bind to localhost only — nginx terminates TLS and proxies to this port.
 app.listen(config.port, '127.0.0.1', () => {
-  log('info', 'server.started', { port: config.port, zarinpal_mode: config.zarinpal.mode, callback_url: config.callbackUrl });
+  log('info', 'server.started', startupLogFields(config));
 });

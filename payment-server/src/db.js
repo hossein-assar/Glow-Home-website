@@ -23,7 +23,41 @@ export function fetchWithTimeout(fetchImpl = fetch, ms = SUPABASE_TIMEOUT_MS) {
   };
 }
 
-export function createDb({ supabaseUrl, serviceRoleKey, fetchImpl = fetch, timeoutMs = SUPABASE_TIMEOUT_MS }) {
+// Calls that are safe to repeat get one more try after RETRY_DELAY_MS, each
+// try limited to ATTEMPT_MS so both fit inside the app's 10 s step limit
+// (4.5 + 0.5 + 4.5 s). Which calls, and why the others are not retried:
+//   fetchProductsBySlugs, findOrderByAuthority, ping — reads.
+//   setAuthority — sets the same value on the same pending order; a second
+//     run after a lost answer finds it already set, so it's harmless.
+//   nextOrderCode — a sequence never hands out a number twice, so a retry
+//     can't duplicate an order code; at worst one number is skipped, exactly
+//     like any checkout abandoned after its code was taken.
+//   createOrder — NOT retried: an insert whose answer was lost may have
+//     succeeded, and running it again would leave a second order (and its
+//     items) for the same checkout. The customer retries the whole checkout.
+//   markFailed / markPaid — not retried here; the callback flow already
+//     handles a failure (see app.js).
+export const ATTEMPT_MS = 4500;
+export const RETRY_DELAY_MS = 500;
+
+/** Runs attempt(signal); on any error waits delayMs and runs it once more. */
+export async function retryOnce(attempt, { attemptMs = ATTEMPT_MS, delayMs = RETRY_DELAY_MS } = {}) {
+  try {
+    return await attempt(AbortSignal.timeout(attemptMs));
+  } catch {
+    await new Promise((r) => setTimeout(r, delayMs));
+    return attempt(AbortSignal.timeout(attemptMs));
+  }
+}
+
+export function createDb({
+  supabaseUrl,
+  serviceRoleKey,
+  fetchImpl = fetch,
+  timeoutMs = SUPABASE_TIMEOUT_MS,
+  attemptMs = ATTEMPT_MS,
+  retryDelayMs = RETRY_DELAY_MS,
+}) {
   const sb = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
     global: { fetch: fetchWithTimeout(fetchImpl, timeoutMs) },
@@ -31,22 +65,32 @@ export function createDb({ supabaseUrl, serviceRoleKey, fetchImpl = fetch, timeo
     // up to ~47 s for one lookup. One attempt; the customer can try again.
     db: { retry: false },
   });
+  const retry = (attempt) => retryOnce(attempt, { attemptMs, delayMs: retryDelayMs });
 
   return {
     async fetchProductsBySlugs(slugs) {
-      const { data, error } = await sb
-        .from('products')
-        .select('id, slug, name_fa, price, height_cm, variants, colors, in_stock')
-        .in('slug', slugs);
-      check(error, 'fetch products');
-      return data || [];
+      return retry(async (signal) => {
+        const { data, error } = await sb
+          .from('products')
+          .select('id, slug, name_fa, price, height_cm, variants, colors, in_stock')
+          .in('slug', slugs)
+          .abortSignal(signal);
+        check(error, 'fetch products');
+        return data || [];
+      });
     },
 
     // Same GH-<seq> code as api/orders.js, including its fallback.
     async nextOrderCode() {
-      const { data, error } = await sb.rpc('nextval_order_code');
-      if (error || data == null) return 'GH-' + Date.now().toString(36).toUpperCase();
-      return 'GH-' + data;
+      try {
+        return await retry(async (signal) => {
+          const { data, error } = await sb.rpc('nextval_order_code').abortSignal(signal);
+          check(error || (data == null && { message: 'empty result' }), 'order code');
+          return 'GH-' + data;
+        });
+      } catch {
+        return 'GH-' + Date.now().toString(36).toUpperCase();
+      }
     },
 
     /** Inserts the order + its items; removes the order again if the items fail. */
@@ -64,24 +108,37 @@ export function createDb({ supabaseUrl, serviceRoleKey, fetchImpl = fetch, timeo
     },
 
     async setAuthority(orderId, authority) {
-      const { data, error } = await sb
-        .from('orders')
-        .update({ payment_authority: authority })
-        .eq('id', orderId)
-        .eq('status', 'pending_payment')
-        .select('id');
-      check(error, 'save authority');
+      const data = await retry(async (signal) => {
+        const { data, error } = await sb
+          .from('orders')
+          .update({ payment_authority: authority })
+          .eq('id', orderId)
+          .eq('status', 'pending_payment')
+          .select('id')
+          .abortSignal(signal);
+        check(error, 'save authority');
+        return data;
+      });
       if (!data || data.length !== 1) throw new Error('save authority: order not in pending_payment');
     },
 
     async findOrderByAuthority(authority) {
-      const { data, error } = await sb
-        .from('orders')
-        .select('id, code, status, total, payment_amount_rial, paid_at')
-        .eq('payment_authority', authority)
-        .maybeSingle();
-      check(error, 'find order by authority');
-      return data;
+      return retry(async (signal) => {
+        const { data, error } = await sb
+          .from('orders')
+          .select('id, code, status, total, payment_amount_rial, paid_at')
+          .eq('payment_authority', authority)
+          .maybeSingle()
+          .abortSignal(signal);
+        check(error, 'find order by authority');
+        return data;
+      });
+    },
+
+    /** Smallest possible read, for /health/deep. One try, no retry. */
+    async ping(signal) {
+      const { error } = await sb.from('products').select('id').limit(1).abortSignal(signal);
+      check(error, 'ping');
     },
 
     /**

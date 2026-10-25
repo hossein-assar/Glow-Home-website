@@ -258,11 +258,12 @@ test('createDb: a Supabase server that never answers makes fetchProductsBySlugs 
     seen.push(String(url));
     return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
   };
-  const db = createDb({ supabaseUrl: 'https://glow-home.ir/sb', serviceRoleKey: 'test-key', fetchImpl: hanging, timeoutMs: 50 });
+  const db = createDb({ supabaseUrl: 'https://glow-home.ir/sb', serviceRoleKey: 'test-key', fetchImpl: hanging, timeoutMs: 50, retryDelayMs: 10 });
   const t0 = Date.now();
   await assert.rejects(db.fetchProductsBySlugs(['gisoo']), /fetch products/);
   assert.ok(Date.now() - t0 < 1000);
-  assert.equal(seen.length, 1, 'retried'); // supabase-js retries are off
+  // supabase-js's own retries are off; ours tries a read exactly twice (db-retry.test.js)
+  assert.equal(seen.length, 2);
   assert.match(seen[0], /^https:\/\/glow-home\.ir\/sb\/rest\/v1\/products\?select=id%2Cslug%2Cname_fa%2Cprice%2Cheight_cm%2Cvariants%2Ccolors%2Cin_stock&slug=in\.%28gisoo%29$/);
 });
 

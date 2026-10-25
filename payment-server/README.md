@@ -49,7 +49,8 @@ log line (`callback_url`).
 
 | Endpoint | |
 |---|---|
-| `GET /health` | `{ "ok": true }` |
+| `GET /health` | `{ "ok": true }`. Instant, never touches Supabase: for uptime monitors. |
+| `GET /health/deep` | One tiny Supabase read, timed: `{ "ok": true, "supabase": "ok" \| "slow", "ms": … }` (slow from 1.5 s), or 503 `{ "ok": false, "supabase": "failed", "ms": … }` on an error or after 5 s (the reason is in the log, `health.supabase_failed`). For a person checking the route, not for monitors. 10 requests / min / IP. |
 | `POST /api/checkout` | CORS: `https://glow-home.ir`, `https://www.glow-home.ir` only. 16 KB body limit. 10 requests / 10 min / IP. |
 | `GET /api/verify` | ZarinPal callback. 30 requests / min / IP. Always redirects to the site. |
 
@@ -66,6 +67,54 @@ amount sent is stored in `orders.payment_amount_rial`.
 `pending_payment` → `paid` (only via `mark_order_paid`) or `payment_failed`.
 `payment_error` holds the reason / ZarinPal code for the admin. Abandoned
 checkouts stay `pending_payment`; no cleanup job runs.
+
+### Supabase route: the VPS uses `https://glow-home.ir/sb`
+
+Direct calls from the Iranian VPS to `*.supabase.co` stall: reads came
+back, but writes (`order_code`, saving the Authority) hung until nginx gave
+up, so checkout never reached ZarinPal. The VPS therefore talks to Supabase
+through the shop's own proxy (the `/sb` rewrites in `vercel.json`, the same
+route the browser uses):
+
+```
+SUPABASE_URL=https://glow-home.ir/sb
+```
+
+- This lives only in the VPS's `payment-server/.env`, which is **not in
+  git**. `.env.bak` next to it holds the previous value (the direct
+  `supabase.co` URL), for going back if the proxy is ever the problem.
+- The `server.started` log line shows the route in use (`supabase_host`,
+  `supabase_path`: `glow-home.ir` and `/sb`), never a key.
+- `GET /health/deep` checks it: `"supabase":"ok"` with a time in ms.
+- If `/sb` breaks (e.g. `vercel.json` changes), checkout breaks too. Keep
+  the three `/sb/{rest,auth,storage}/v1` rewrites.
+
+Timeouts: every Supabase request is aborted after 10 s, every checkout step
+(Supabase or ZarinPal call) is limited to 10 s and the whole request to
+25 s. Calls that are safe to repeat (reads, saving the Authority, the order
+number) get one more try after 0.5 s, each try at most 4.5 s; creating the
+order is never repeated, so a lost answer can't become a second order (see
+`src/db.js`). Any failure is logged as `checkout.failed` / `verify.failed`
+with the step name.
+
+### VPS env checklist
+
+`payment-server/.env` on the VPS (`chmod 600`, never committed; template:
+`.env.example`). Names only:
+
+| Variable | Required | Note |
+|---|---|---|
+| `SUPABASE_URL` | yes | `https://glow-home.ir/sb` on the VPS (see above) |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | Supabase secret / service_role key |
+| `ZARINPAL_MERCHANT_ID` | yes | 36-character UUID |
+| `ZARINPAL_MODE` | no (default `sandbox`) | `production` when live |
+| `PUBLIC_SITE_URL` | yes | the shop, `https://glow-home.ir` |
+| `PUBLIC_API_URL` | yes | this server, `https://pay.glow-home.ir` |
+| `CALLBACK_URL` | production | `https://glow-home.ir/api/pay-callback` |
+| `PORT` | no (default `3000`) | must match nginx `proxy_pass` |
+
+After editing `.env`: `pm2 restart glow-payment --update-env`, then check
+the `server.started` line and `/health/deep`.
 
 ## Local development (sandbox)
 
@@ -154,6 +203,8 @@ pm2 logs glow-payment --lines 50          # "server.started" … zarinpal_mode
 
 ### 3. Updating
 
+(The live VPS checkout is in `~/glow-home`, not `/opt/glow-home`.)
+
 ```bash
 cd /opt/glow-home
 git pull
@@ -162,6 +213,7 @@ npm ci --omit=dev
 pm2 restart glow-payment --update-env
 pm2 save
 curl -s https://pay.glow-home.ir/health
+curl -s https://pay.glow-home.ir/health/deep   # "supabase":"ok"
 ```
 
 ### 4. Going live
@@ -185,6 +237,10 @@ human:
 - `verify.paid_but_not_markable` / `verify.unexpected_status`: the order is
   cancelled or not in a payable state. Check it in the ZarinPal panel and
   refund it manually if needed.
+- `checkout.failed` / `verify.failed`: the `step` field names what failed
+  or timed out (`fetch_products`, `order_code`, `create_order`,
+  `zarinpal_request`, `save_authority`, `find_order`, `zarinpal_verify`, …).
+  Repeated Supabase steps failing: check `/health/deep` and `SUPABASE_URL`.
 - `zarinpal.request_failed` with code `-10`: wrong merchant id, or the VPS IP
   isn't registered at ZarinPal.
 - `zarinpal.request_failed` with code `-14`, or the «دسترسی از این دامنه

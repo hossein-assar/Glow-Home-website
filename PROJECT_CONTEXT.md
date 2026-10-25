@@ -21,6 +21,18 @@ decisions from code alone — read this before making structural changes.
   sends *which* products and *how many* — the function re-fetches real
   prices/stock from the DB itself, so nobody can tamper with pricing from
   devtools. Never let the browser write directly to `orders`/`order_items`.
+- **Payment server (ZarinPal)**: `payment-server/`, a Node server on an
+  Iranian VPS (ZarinPal only accepts requests from a registered server IP),
+  run by pm2 as `glow-payment` behind nginx at `pay.glow-home.ir`. It
+  re-prices the cart from Supabase like `/api/orders.js`. **It reaches
+  Supabase through `https://glow-home.ir/sb`, not `*.supabase.co`**: direct
+  calls from the VPS stalled on writes (order number, saving the ZarinPal
+  Authority) while reads worked, so checkout hung. `SUPABASE_URL` is set in
+  the VPS's `payment-server/.env`, which is **not in git** (`.env.bak` there
+  holds the old direct URL). The `server.started` log line shows the route
+  in use (host/path only); `GET /health/deep` checks it. The `/sb` rewrites
+  in `vercel.json` are therefore needed by the payment server too. Env
+  checklist and timeouts: `payment-server/README.md`.
 - **Checkout field validation**: کد پستی and شماره موبایل are both
   validated and normalized on *both* sides — `app.js` client-side, mirrored
   by hand in `api/orders.js` server-side (never trusts the client's own

@@ -101,9 +101,11 @@ function requestGuard(timeouts, onTimeout) {
 // unreachable Supabase / ZarinPal (502).
 const LOCAL_STEPS = new Set(['start', 'validate', 'price']);
 
+export const DEEP_HEALTH = { slowMs: 1500, timeoutMs: 5000 };
+
 const errorFields = (err) => ({ error: (err && err.name) || 'Error', message: String((err && err.message) || err).slice(0, 300) });
 
-export function createApp({ config, db, zarinpal, logger = log, timeouts = DEFAULT_TIMEOUTS }) {
+export function createApp({ config, db, zarinpal, logger = log, timeouts = DEFAULT_TIMEOUTS, deepHealth = DEEP_HEALTH }) {
   const app = express();
 
   app.set('trust proxy', 'loopback'); // behind nginx on the same host (README)
@@ -111,7 +113,32 @@ export function createApp({ config, db, zarinpal, logger = log, timeouts = DEFAU
   // The storefront reads /api/checkout cross-origin (CORS-restricted below).
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
+  // For uptime monitors: instant, never touches Supabase.
   app.get('/health', (req, res) => res.json({ ok: true }));
+
+  // For a person checking the route to Supabase: one tiny read, timed.
+  // ok < deepHealth.slowMs ≤ slow; failed on an error or after timeoutMs.
+  // Rate limited, since every call reaches Supabase; no host, key or
+  // Supabase message in the answer (those go to the log).
+  const deepHealthLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { ok: false, error: 'Too many requests' },
+  });
+  app.get('/health/deep', deepHealthLimiter, async (req, res) => {
+    const t0 = Date.now();
+    try {
+      await withTimeout(() => db.ping(AbortSignal.timeout(deepHealth.timeoutMs)), deepHealth.timeoutMs, 'supabase_ping');
+      const ms = Date.now() - t0;
+      res.json({ ok: true, supabase: ms < deepHealth.slowMs ? 'ok' : 'slow', ms });
+    } catch (err) {
+      const ms = Date.now() - t0;
+      logger('error', 'health.supabase_failed', { ms, ...errorFields(err) });
+      res.status(503).json({ ok: false, supabase: 'failed', ms });
+    }
+  });
 
   // ---- POST /api/checkout -------------------------------------------------
   const checkoutCors = cors({

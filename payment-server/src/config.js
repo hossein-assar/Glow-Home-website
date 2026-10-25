@@ -86,5 +86,22 @@ export function loadConfig() {
   });
 }
 
+/**
+ * The non-secret facts the server.started log line records: which Supabase
+ * route is in use (host and path only — e.g. glow-home.ir /sb on the VPS,
+ * see README "VPS env checklist"), ZarinPal mode and the callback URL.
+ * Never keys, the merchant id, or anything else from the environment.
+ */
+export function startupLogFields(config) {
+  const supabase = new URL(config.supabaseUrl);
+  return {
+    port: config.port,
+    supabase_host: supabase.host,
+    supabase_path: supabase.pathname.replace(/\/+$/, '') || '/',
+    zarinpal_mode: config.zarinpal.mode,
+    callback_url: config.callbackUrl,
+  };
+}
+
 // Fixed, not configurable — the storefront only ever lives on these.
 export const ALLOWED_ORIGINS = ['https://glow-home.ir', 'https://www.glow-home.ir'];
