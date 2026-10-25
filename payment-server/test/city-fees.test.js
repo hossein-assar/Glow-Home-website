@@ -279,7 +279,7 @@ test('checkout summary: «هزینه بسته‌بندی ۲۵۰٬۰۰۰ توما
   }
 });
 
-test('typing the city updates only the fee rows and totals — no re-render', () => {
+test('typing the city updates the summary in place (fee rows, totals) — the form is never re-rendered', () => {
   const sf = storefront('');
   sf.state.form.city = 'کرج';
   sf.refreshSummaryTotals();
@@ -288,7 +288,20 @@ test('typing the city updates only the fee rows and totals — no re-render', ()
   sf.state.form.city = 'تهران';
   sf.refreshSummaryTotals();
   assert.equal(sf.nodes.fees[0].innerHTML, '');
-  // the #city input handler itself: checkout-city.test.js
+
+  // The guarantee: refreshSummaryTotals only writes into [data-sum] summary
+  // hooks (courier options, «ارسال» row, note, fee rows, totals) — none of
+  // them contains a form field, so the city input and its cursor stay — and
+  // neither it nor the #city input handler calls render().
+  const refresh = appJs.match(/function refreshSummaryTotals\(\) \{[\s\S]*?\n}\n/)[0];
+  const selectors = [...refresh.matchAll(/\$\$\('([^']*)'\)/g)].map((m) => m[1]);
+  assert.deepEqual(selectors, ['[data-sum="ship-options"]', '[data-sum="ship-row"]', '[data-sum="ship-hint"]', '[data-sum="fees"]', '[data-sum="total"]']);
+  assert.doesNotMatch(refresh, /render\(|innerHTML = .*<input|getElementById/);
+  const handler = appJs.match(/document\.addEventListener\('input', \(e\) => \{\n  if \(e\.target\.id !== 'city' \|\| state\.route !== 'checkout'\) return;[\s\S]*?\n\}\);\n/)[0];
+  assert.match(handler, /refreshSummaryTotals\(\);/);
+  assert.doesNotMatch(handler.replace(/\/\/[^\n]*/g, ''), /render\(\)/);
+  // (the input handler is run for real, with the cursor field, in checkout-city.test.js)
+
   // cart, checkout and the mobile bar all carry the hooks
   assert.equal((appJs.match(/<div data-sum="fees">\$\{feeRowsHtml\(t\)\}<\/div>/g) || []).length, 2);
   assert.equal((appJs.match(/data-sum="total">\$\{money\(t\.total\)\}/g) || []).length, 3);
