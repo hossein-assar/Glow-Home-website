@@ -961,7 +961,7 @@ function card(p) {
           <span class="card-name">${esc(p.fa)}</span>
           ${p.en ? `<span class="latin-name">${esc(p.en)}</span>` : ''}
         </div>
-        <span class="card-meta">${esc(p.meta)}${p.variants && p.variants.length ? ' · چند اندازه' : ''}</span>
+        <span class="card-meta">${esc(p.meta)}${p.variants && p.variants.length > 1 ? ' · چند اندازه' : ''}</span>
         <div class="card-price">
           <b>${p.priceFa}</b>
           ${p.provisional ? '<span class="temp-flag">موقت</span>' : ''}

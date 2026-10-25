@@ -177,6 +177,20 @@ test('nila product page: «نوع شید» picker with both shades, no size pick
   }
 });
 
+test('card shows «· چند اندازه» only for more than one size: not nila, yes gisoo', () => {
+  const card = new Function(
+    'state', 'byId', 'cardCartKey', 'icon', 'esc',
+    `${fnSrc(appJs, 'media')}${fnSrc(appJs, 'card')} return card;`
+  )({ favs: {}, cart: {} }, () => null, () => null, () => '', (s) => String(s ?? ''));
+  const gisoo = {
+    ...item, id: 'gisoo', fa: 'گیسو', meta: '۱۰۰ سانتی‌متر · سفال',
+    variants: [100, 120, 140].map((height) => ({ height, price: 1, shades: { plain: 1, embroidered: 2 } })),
+  };
+  assert.doesNotMatch(card(item), /چند اندازه/);
+  assert.match(card(gisoo), /<span class="card-meta">۱۰۰ سانتی‌متر · سفال · چند اندازه<\/span>/);
+  assert.doesNotMatch(card({ ...item, variants: [] }), /چند اندازه/);
+});
+
 // ---- admin ---------------------------------------------------------------------
 
 test('admin shows one row (40 cm) with «شید ساده» and «شید گلدوزی» price boxes for nila', () => {
