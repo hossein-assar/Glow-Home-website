@@ -4,7 +4,7 @@
 
 import { RIAL_PER_TOMAN, ZARINPAL_CURRENCY } from './config.js';
 
-const TIMEOUT_MS = 15000;
+const TIMEOUT_MS = 10000; // same as the app's per-step limit (DEFAULT_TIMEOUTS.stepMs)
 
 // From https://www.zarinpal.com/docs/paymentGateway/errorList.html — used for
 // logs and the admin-visible payment_error column, never shown to customers.

@@ -9,9 +9,27 @@ function check(error, what) {
   if (error) throw new Error(`${what}: ${error.message || error.code || 'unknown error'}`);
 }
 
-export function createDb({ supabaseUrl, serviceRoleKey }) {
+// Each Supabase HTTP request is aborted after this long. Without it a
+// connection that opens but never answers waits for Node's own 300 s limit,
+// long after nginx (60 s) has given up — a checkout that hangs silently.
+export const SUPABASE_TIMEOUT_MS = 10000;
+
+/** fetch with a hard time limit, keeping any signal supabase-js passes. */
+export function fetchWithTimeout(fetchImpl = fetch, ms = SUPABASE_TIMEOUT_MS) {
+  return (url, options = {}) => {
+    const timeout = AbortSignal.timeout(ms);
+    const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+    return fetchImpl(url, { ...options, signal });
+  };
+}
+
+export function createDb({ supabaseUrl, serviceRoleKey, fetchImpl = fetch, timeoutMs = SUPABASE_TIMEOUT_MS }) {
   const sb = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: fetchWithTimeout(fetchImpl, timeoutMs) },
+    // supabase-js retries a timed-out GET 3 more times (1 s, 2 s, 4 s apart):
+    // up to ~47 s for one lookup. One attempt; the customer can try again.
+    db: { retry: false },
   });
 
   return {

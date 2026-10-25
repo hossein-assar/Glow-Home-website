@@ -2227,11 +2227,21 @@ function isOnlinePayment() {
 const ZARINPAL_STARTPAY = /^https:\/\/(payment|sandbox)\.zarinpal\.com\/pg\/StartPay\/[A-Za-z0-9]+$/;
 const GATEWAY_FAIL = 'اتصال به درگاه پرداخت برقرار نشد. لطفاً چند دقیقه بعد دوباره تلاش کنید.';
 
+// The payment server answers within 25 s (its own limit); past this the
+// customer gets an error and an enabled «پرداخت آنلاین» button to try again,
+// not an endless «در حال انتقال به درگاه…». They have not paid anything yet.
+const CHECKOUT_TIMEOUT_MS = 30000;
+const GATEWAY_TIMEOUT =
+  'پاسخی از درگاه پرداخت دریافت نشد. هیچ مبلغی از حساب شما کسر نشده است. لطفاً دوباره تلاش کنید.';
+
 function startOnlinePayment(payload, fail) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), CHECKOUT_TIMEOUT_MS);
   fetch(ONLINE_PAYMENT.apiUrl + '/api/checkout', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    signal: ctrl.signal,
   })
     .then((r) => r.json())
     .then((res) => {
@@ -2242,7 +2252,8 @@ function startOnlinePayment(payload, fail) {
       // it. It's cleared on the #/payment/<code>/ok page instead.
       location.href = res.url;
     })
-    .catch(() => fail(GATEWAY_FAIL));
+    .catch(() => fail(ctrl.signal.aborted ? GATEWAY_TIMEOUT : GATEWAY_FAIL))
+    .finally(() => clearTimeout(timer));
 }
 
 // Coming back from ZarinPal with the browser's Back button can restore this
