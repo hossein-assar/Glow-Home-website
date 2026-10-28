@@ -263,6 +263,16 @@ the base size. The storefront drops any cart line it can't price —
   everything else in the codebase should still go through `esc()` as
   normal; this is a small, deliberate exception, not a new default.
 
+- **Header markup must not depend on the route or the menu**: `render()`
+  keeps the header (and the search input in it) in place only while
+  `header()` returns the same HTML, and typing the first letter anywhere
+  switches the route to the shop. So the main navigation — category bar
+  (>= 900px, dropdown for a section with subcategories) and mobile drawer —
+  never bakes in the current page or open/closed state: `syncNav()` sets
+  `aria-current` and the open classes on the existing nodes after each
+  render, and opening/closing never calls `render()`.
+  `test/storefront-nav.test.js` guards this.
+
 ## Not yet built
 
 - **Payment gateway** — no ZarinPal/Snapp Pay *API* integration. Checkout

@@ -66,6 +66,7 @@ function makeEnv() {
      const tabbar = () => '';
      const renderLightbox = () => '';
      const hydrateMedia = () => {};
+     const syncNav = () => {};
      ${renderSrc}
      ${searchSrc}
      return { render };`

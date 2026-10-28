@@ -231,10 +231,9 @@ main { min-height: 60vh; }
   z-index: 40;
 }
 
-/* Keeps the icon row visibly above the dimmed .menu-overlay (which is a
-   sibling further down in .header, positioned to cover the whole viewport)
-   so the hamburger stays crisp and clickable while the menu is open. */
-.header > .shell { position: relative; z-index: 42; }
+/* While the drawer is open the header (which holds it) goes above the
+   bottom tab bar and the sticky action bar. */
+html.menu-open .header { z-index: 60; }
 
 .header-top {
   display: grid;
@@ -324,138 +323,258 @@ main { min-height: 60vh; }
   text-align: center;
 }
 
-/* ---- Hamburger menu panel (desktop + mobile alike) -----------------------
-   A compact dropdown anchored to the hamburger button, not a full-bleed
-   panel — it should read as a small flyout, never as wide as the header.
-   Search used to live inside this panel; it's now a persistent bar in the
-   header itself (see .header-search / .search-box below), so this panel is
-   nav links only. */
+/* ---- Navigation: desktop category bar ----------------------------------
+   >= 900px: every section in a row under the search, with a small dropdown
+   for a section that has subcategories. The hamburger and drawer are for
+   narrower screens only. Open/current state is set by syncNav() and
+   friends in app.js, never by re-rendering the header. */
 
-.menu-overlay {
+.catbar { display: none; }
+
+@media (min-width: 900px) {
+  .menu-btn { display: none; }
+  .drawer, .drawer-backdrop { display: none; }
+
+  .catbar { display: block; border-top: 1px solid var(--color-divider); }
+  .catbar-list {
+    list-style: none;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    padding-block: 6px;
+  }
+  .catbar-item { position: relative; display: flex; align-items: center; }
+  .catbar-link,
+  .catbar-toggle {
+    position: relative;
+    background: none;
+    border: 0;
+    border-radius: var(--radius-md);
+    color: var(--color-neutral-800);
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+  .catbar-link { padding: 9px 14px; font-size: 15px; font-weight: 500; white-space: nowrap; }
+  .catbar-item[data-sub] .catbar-link { padding-inline-end: 4px; }
+  .catbar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 40px;
+    color: var(--color-neutral-500);
+  }
+  .catbar-toggle svg { transition: transform 0.18s ease; }
+  .catbar-item.is-open .catbar-toggle svg { transform: rotate(180deg); }
+  .catbar-link:hover,
+  .catbar-toggle:hover,
+  .catbar-item.is-open > .catbar-link,
+  .catbar-item.is-open > .catbar-toggle { background: var(--color-accent-100); }
+
+  /* Current page: accent text with a short underline; a section's link
+     also gets it on its subcategory and product pages. */
+  .catbar-link[aria-current='page'],
+  .catbar-link.in-section { color: var(--color-accent-700); font-weight: 700; }
+  .catbar-link[aria-current='page']::after,
+  .catbar-link.in-section::after {
+    content: '';
+    position: absolute;
+    inset-inline: 14px;
+    bottom: 3px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--color-accent-500);
+  }
+  .catbar-item[data-sub] .catbar-link[aria-current='page']::after,
+  .catbar-item[data-sub] .catbar-link.in-section::after { inset-inline-end: 4px; }
+
+  .catbar-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    inset-inline-start: 0;
+    z-index: 5;
+    min-width: 190px;
+    display: flex;
+    flex-direction: column;
+    padding: 8px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 18px 40px rgba(22, 21, 20, 0.18);
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0s linear 0.15s;
+  }
+  /* Bridges the 4px gap so the pointer can travel from the bar into the
+     dropdown without leaving the item. */
+  .catbar-dropdown::before { content: ''; position: absolute; inset-inline: 0; top: -6px; height: 6px; }
+  .catbar-item.is-open .catbar-dropdown {
+    visibility: visible;
+    opacity: 1;
+    transform: none;
+    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0s;
+  }
+  .catbar-dropdown button {
+    text-align: start;
+    background: none;
+    border: 0;
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    font-size: 14.5px;
+    color: var(--color-neutral-700);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+  .catbar-dropdown button:hover,
+  .catbar-dropdown button:focus-visible { background: var(--color-accent-100); }
+  .catbar-dropdown button[aria-current='page'] { color: var(--color-accent-700); font-weight: 700; }
+}
+
+/* ---- Navigation: mobile drawer -------------------------------------------
+   < 900px: the hamburger opens a full-height panel from the start (right)
+   side. Big rows, subcategories always shown as chips under their section,
+   and order tracking / contact / cart at the bottom. html.menu-open (set in
+   applyMenu()) locks the page's scroll behind it. */
+
+html.menu-open,
+html.menu-open body { overflow: hidden; }
+
+.drawer-backdrop {
   position: fixed;
   inset: 0;
+  z-index: 1;
   background: rgba(22, 21, 20, 0.45);
-  z-index: 39;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.22s ease, visibility 0s linear 0.22s;
+}
+html.menu-open .drawer-backdrop {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.22s ease, visibility 0s;
 }
 
-.menu-panel {
-  position: absolute;
-  top: calc(100% + 10px);
+.drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
   inset-inline-start: 0;
-  width: min(300px, 88vw);
-  max-height: min(70vh, 520px);
-  overflow-y: auto;
-  background: var(--color-bg);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 18px 40px rgba(22, 21, 20, 0.18);
-  padding: 14px;
-  animation: menu-in 0.16s ease;
-}
-@keyframes menu-in {
-  from { opacity: 0; transform: translateY(-6px); }
-  to { opacity: 1; transform: none; }
-}
-
-.menu-nav { display: flex; flex-direction: column; }
-/* Direct-child combinator deliberately, not a descendant selector: this must
-   style only the top-level rows (خانه/فروشگاه/درباره ما/...) that sit right
-   under nav.menu-nav. A plain ".menu-nav button" used to also match the
-   .menu-nav-link/.menu-nav-toggle buttons nested inside .menu-nav-group
-   below — its width:100% (specificity 0,1,1) beat their own single-class
-   rules (0,1,0) and forced the toggle to claim the whole row width, leaving
-   the link almost no room and wrapping category names one letter per line. */
-.menu-nav > button {
-  display: block;
-  width: 100%;
-  text-align: start;
-  background: none;
-  border: 0;
-  border-radius: var(--radius-md);
-  border-bottom: 1px solid var(--color-divider);
-  padding: 12px 10px;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--color-neutral-800);
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-.menu-nav > button:last-child { border-bottom: 0; }
-.menu-nav > button[aria-current='true'] { font-weight: 700; color: var(--color-accent-700); }
-/* Soft tint on hover/keyboard-focus — same convention as .collection-card
-   elsewhere (an accent-100 tint over the page's own --color-bg tone). None
-   of these rows had any hover feedback before; they felt inert. */
-.menu-nav > button:hover,
-.menu-nav > button:focus-visible { background: var(--color-accent-100); }
-
-.menu-nav-group { display: flex; flex-direction: column; }
-.menu-nav-row { display: flex; align-items: stretch; border-bottom: 1px solid var(--color-divider); }
-.menu-nav-link {
-  flex: 1;
-  min-width: 0;
-  display: block;
-  text-align: start;
-  background: none;
-  border: 0;
-  border-radius: var(--radius-md);
-  padding: 12px 10px;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--color-neutral-800);
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-.menu-nav-link:hover,
-.menu-nav-link:focus-visible { background: var(--color-accent-100); }
-.menu-nav-link[aria-current='true'] { font-weight: 700; color: var(--color-accent-700); }
-
-/* Separate disclosure button, deliberately apart from .menu-nav-link — the
-   category text still navigates on click same as before; this is the only
-   thing that opens/closes the subcategory list now (see the comment above
-   renderCategoryBlock() in app.js for why it used to be :hover-triggered
-   and isn't anymore). */
-.menu-nav-toggle {
-  flex: 0 0 auto;
-  width: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: 0;
-  border-radius: var(--radius-md);
-  color: var(--color-neutral-500);
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-.menu-nav-toggle:hover,
-.menu-nav-toggle:focus-visible { background: var(--color-accent-100); }
-.menu-nav-toggle svg { transition: transform 0.18s ease; }
-.menu-nav-group.open .menu-nav-toggle svg { transform: rotate(180deg); }
-
-.menu-nav-sub {
+  z-index: 2;
+  width: min(86vw, 360px);
   display: flex;
   flex-direction: column;
-  padding-inline-start: 18px;
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition: max-height 0.2s ease, opacity 0.15s ease;
+  background: var(--color-bg);
+  box-shadow: 0 0 40px rgba(22, 21, 20, 0.22);
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform 0.26s ease, visibility 0s linear 0.26s;
 }
-.menu-nav-group.open .menu-nav-sub {
-  max-height: 400px;
-  opacity: 1;
+.drawer.is-open {
+  transform: none;
+  visibility: visible;
+  transition: transform 0.26s ease, visibility 0s;
 }
-.menu-nav-sub button {
-  font-size: 13.5px;
-  font-weight: 400;
-  color: var(--color-neutral-600);
-  padding-block: 10px;
-  border-radius: var(--radius-md);
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  padding-top: calc(14px + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--color-divider);
+}
+.drawer-title { font-family: var(--font-display); font-size: 20px; font-weight: 500; color: #A0806A; }
+
+.drawer-nav {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px 16px;
+}
+.drawer-group { border-bottom: 1px solid var(--color-divider); padding-bottom: 12px; }
+.drawer-link {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 12px;
+  text-align: start;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--color-divider);
+  border-radius: 0;
+  font-size: 16.5px;
+  font-weight: 500;
+  color: var(--color-neutral-800);
+  cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
-.menu-nav-sub button:hover,
-.menu-nav-sub button:focus-visible { background: var(--color-accent-100); }
-.menu-nav-sub button[aria-current='true'] { color: var(--color-accent-700); font-weight: 600; }
+.drawer-group .drawer-link { border-bottom: 0; }
+.drawer-link:hover,
+.drawer-link:focus-visible { background: var(--color-accent-100); }
+.drawer-link[aria-current='page'],
+.drawer-link.in-section { color: var(--color-accent-700); font-weight: 700; }
+
+.drawer-chips { display: flex; flex-wrap: wrap; gap: 8px; padding-inline: 12px; }
+/* 48px tap targets, a notch above .chip-sm's usual 34px. */
+.drawer-chips .chip { min-height: 48px; padding-inline: 18px; font-size: 14.5px; }
+.drawer-chips .chip[aria-current='page'] {
+  background: var(--color-accent-500);
+  border-color: var(--color-accent-500);
+  color: #fff;
+}
+
+.drawer-foot {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 12px 14px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--color-divider);
+  background: var(--color-surface);
+}
+.drawer-foot-link {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 64px;
+  padding: 8px 4px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--color-neutral-800);
+  cursor: pointer;
+}
+.drawer-foot-link svg { color: var(--color-accent-600); }
+.drawer-foot-link:hover,
+.drawer-foot-link:focus-visible { background: var(--color-accent-100); }
+.drawer-count {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 8px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-500);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
 
 /* ---- Typography --------------------------------------------------------- */
 
