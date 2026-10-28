@@ -231,7 +231,7 @@ main { min-height: 60vh; }
   z-index: 40;
 }
 
-/* While the drawer is open the header (which holds it) goes above the
+/* While the menu is open the header (which holds it) goes above the
    bottom tab bar and the sticky action bar. */
 html.menu-open .header { z-index: 60; }
 
@@ -323,162 +323,63 @@ html.menu-open .header { z-index: 60; }
   text-align: center;
 }
 
-/* ---- Navigation: desktop category bar ----------------------------------
-   >= 900px: every section in a row under the search, with a small dropdown
-   for a section that has subcategories. The hamburger and drawer are for
-   narrower screens only. Open/current state is set by syncNav() and
-   friends in app.js, never by re-rendering the header. */
+/* ---- Navigation menu ------------------------------------------------------
+   The hamburger (every screen size) opens one panel: every category as a
+   heading with all its subcategories under it, then the quick links and
+   the cart. Below 900px it is a full-height drawer from the start (right)
+   side; from 900px up the same nodes become a wide panel under the header,
+   one column per category. Open state and the current page are set by
+   applyMenu()/syncNav() in app.js, never by re-rendering the header.
+   html.menu-open locks the page's scroll behind it. */
 
-.catbar { display: none; }
-
-@media (min-width: 900px) {
-  .menu-btn { display: none; }
-  .drawer, .drawer-backdrop { display: none; }
-
-  .catbar { display: block; border-top: 1px solid var(--color-divider); }
-  .catbar-list {
-    list-style: none;
-    display: flex;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 4px 6px;
-    padding-block: 6px;
-  }
-  .catbar-item { position: relative; display: flex; align-items: center; }
-  .catbar-link,
-  .catbar-toggle {
-    position: relative;
-    background: none;
-    border: 0;
-    border-radius: var(--radius-md);
-    color: var(--color-neutral-800);
-    cursor: pointer;
-    transition: background-color 0.15s ease, color 0.15s ease;
-  }
-  .catbar-link { padding: 9px 14px; font-size: 15px; font-weight: 500; white-space: nowrap; }
-  .catbar-item[data-sub] .catbar-link { padding-inline-end: 4px; }
-  .catbar-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 40px;
-    color: var(--color-neutral-500);
-  }
-  .catbar-toggle svg { transition: transform 0.18s ease; }
-  .catbar-item.is-open .catbar-toggle svg { transform: rotate(180deg); }
-  .catbar-link:hover,
-  .catbar-toggle:hover,
-  .catbar-item.is-open > .catbar-link,
-  .catbar-item.is-open > .catbar-toggle { background: var(--color-accent-100); }
-
-  /* Current page: accent text with a short underline; a section's link
-     also gets it on its subcategory and product pages. */
-  .catbar-link[aria-current='page'],
-  .catbar-link.in-section { color: var(--color-accent-700); font-weight: 700; }
-  .catbar-link[aria-current='page']::after,
-  .catbar-link.in-section::after {
-    content: '';
-    position: absolute;
-    inset-inline: 14px;
-    bottom: 3px;
-    height: 2px;
-    border-radius: 2px;
-    background: var(--color-accent-500);
-  }
-  .catbar-item[data-sub] .catbar-link[aria-current='page']::after,
-  .catbar-item[data-sub] .catbar-link.in-section::after { inset-inline-end: 4px; }
-
-  .catbar-dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    inset-inline-start: 0;
-    z-index: 5;
-    min-width: 190px;
-    display: flex;
-    flex-direction: column;
-    padding: 8px;
-    background: var(--color-bg);
-    border: 1px solid var(--color-divider);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 18px 40px rgba(22, 21, 20, 0.18);
-    visibility: hidden;
-    opacity: 0;
-    transform: translateY(-4px);
-    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0s linear 0.15s;
-  }
-  /* Bridges the 4px gap so the pointer can travel from the bar into the
-     dropdown without leaving the item. */
-  .catbar-dropdown::before { content: ''; position: absolute; inset-inline: 0; top: -6px; height: 6px; }
-  .catbar-item.is-open .catbar-dropdown {
-    visibility: visible;
-    opacity: 1;
-    transform: none;
-    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0s;
-  }
-  .catbar-dropdown button {
-    text-align: start;
-    background: none;
-    border: 0;
-    border-radius: var(--radius-md);
-    padding: 10px 12px;
-    font-size: 14.5px;
-    color: var(--color-neutral-700);
-    white-space: nowrap;
-    cursor: pointer;
-    transition: background-color 0.15s ease, color 0.15s ease;
-  }
-  .catbar-dropdown button:hover,
-  .catbar-dropdown button:focus-visible { background: var(--color-accent-100); }
-  .catbar-dropdown button[aria-current='page'] { color: var(--color-accent-700); font-weight: 700; }
-}
-
-/* ---- Navigation: mobile drawer -------------------------------------------
-   < 900px: the hamburger opens a full-height panel from the start (right)
-   side. Big rows, subcategories always shown as chips under their section,
-   and order tracking / contact / cart at the bottom. html.menu-open (set in
-   applyMenu()) locks the page's scroll behind it. */
+.menu-btn .icon-close { display: none; }
+.menu-btn[aria-expanded='true'] .icon-open { display: none; }
+.menu-btn[aria-expanded='true'] .icon-close { display: block; }
 
 html.menu-open,
 html.menu-open body { overflow: hidden; }
 
-.drawer-backdrop {
+.menu-backdrop {
   position: fixed;
   inset: 0;
   z-index: 1;
   background: rgba(22, 21, 20, 0.45);
   opacity: 0;
   visibility: hidden;
+  pointer-events: none; /* while it fades out, a tap goes to the page (e.g. the hamburger again) */
   transition: opacity 0.22s ease, visibility 0s linear 0.22s;
 }
-html.menu-open .drawer-backdrop {
+html.menu-open .menu-backdrop {
   opacity: 1;
   visibility: visible;
+  pointer-events: auto;
   transition: opacity 0.22s ease, visibility 0s;
 }
 
-.drawer {
+.menu-panel {
   position: fixed;
   top: 0;
   bottom: 0;
   inset-inline-start: 0;
   z-index: 2;
-  width: min(86vw, 360px);
+  width: min(88vw, 380px);
   display: flex;
   flex-direction: column;
   background: var(--color-bg);
   box-shadow: 0 0 40px rgba(22, 21, 20, 0.22);
   transform: translateX(100%);
   visibility: hidden;
+  pointer-events: none;
   transition: transform 0.26s ease, visibility 0s linear 0.26s;
 }
-.drawer.is-open {
+.menu-panel.is-open {
   transform: none;
   visibility: visible;
+  pointer-events: auto;
   transition: transform 0.26s ease, visibility 0s;
 }
 
-.drawer-head {
+.menu-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -487,93 +388,175 @@ html.menu-open .drawer-backdrop {
   padding-top: calc(14px + env(safe-area-inset-top));
   border-bottom: 1px solid var(--color-divider);
 }
-.drawer-title { font-family: var(--font-display); font-size: 20px; font-weight: 500; color: #A0806A; }
+.menu-title { font-family: var(--font-display); font-size: 20px; font-weight: 500; color: #A0806A; }
 
-.drawer-nav {
+/* One scrolling column: categories, then quick links, then the cart. */
+.menu-body {
   flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  padding: 8px 10px 16px;
+  gap: 18px;
+  padding: 8px 18px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
 }
-.drawer-group { border-bottom: 1px solid var(--color-divider); padding-bottom: 12px; }
-.drawer-link {
+
+.menu-cats { display: flex; flex-direction: column; }
+.menu-cat { padding-block: 6px 16px; border-bottom: 1px solid var(--color-divider); }
+.menu-cat-title {
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 52px;
-  padding: 0 12px;
+  min-height: 48px;
+  padding: 0 4px;
   text-align: start;
   background: none;
   border: 0;
-  border-bottom: 1px solid var(--color-divider);
-  border-radius: 0;
-  font-size: 16.5px;
-  font-weight: 500;
+  border-radius: var(--radius-md);
+  font-size: 17px;
+  font-weight: 700;
   color: var(--color-neutral-800);
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
-.drawer-group .drawer-link { border-bottom: 0; }
-.drawer-link:hover,
-.drawer-link:focus-visible { background: var(--color-accent-100); }
-.drawer-link[aria-current='page'],
-.drawer-link.in-section { color: var(--color-accent-700); font-weight: 700; }
+.menu-cat-title:hover,
+.menu-cat-title:focus-visible { background: var(--color-accent-100); }
+.menu-cat-title[aria-current='page'],
+.menu-cat-title.in-section { color: var(--color-accent-700); }
 
-.drawer-chips { display: flex; flex-wrap: wrap; gap: 8px; padding-inline: 12px; }
-/* 48px tap targets, a notch above .chip-sm's usual 34px. */
-.drawer-chips .chip { min-height: 48px; padding-inline: 18px; font-size: 14.5px; }
-.drawer-chips .chip[aria-current='page'] {
+.menu-subs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+/* Chips with 48px tap targets on phones (the usual .chip is 40px). */
+.chip.menu-sub { min-height: 48px; padding-inline: 18px; font-size: 14.5px; }
+.chip.menu-sub:hover { background: var(--color-accent-100); }
+.chip.menu-sub[aria-current='page'] {
   background: var(--color-accent-500);
   border-color: var(--color-accent-500);
   color: #fff;
 }
 
-.drawer-foot {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 12px 14px;
-  padding-bottom: calc(12px + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--color-divider);
-  background: var(--color-surface);
-}
-.drawer-foot-link {
+.menu-quick { display: flex; flex-direction: column; }
+.menu-quick-link {
   position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-height: 64px;
-  padding: 8px 4px;
-  background: var(--color-bg);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-md);
-  font-size: 13px;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 4px;
+  text-align: start;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--color-divider);
+  font-size: 16px;
   font-weight: 500;
-  line-height: 1.4;
   color: var(--color-neutral-800);
   cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
-.drawer-foot-link svg { color: var(--color-accent-600); }
-.drawer-foot-link:hover,
-.drawer-foot-link:focus-visible { background: var(--color-accent-100); }
-.drawer-count {
-  position: absolute;
-  top: 6px;
-  inset-inline-end: 8px;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
+.menu-quick-link svg { color: var(--color-accent-600); }
+.menu-quick-link:hover,
+.menu-quick-link:focus-visible { background: var(--color-accent-100); }
+.menu-quick-link[aria-current='page'] { color: var(--color-accent-700); font-weight: 700; }
+
+.menu-cart {
+  margin-top: 14px;
+  padding-inline: 16px;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+.menu-count {
+  margin-inline-start: auto;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
   border-radius: var(--radius-pill);
   background: var(--color-accent-500);
   color: #fff;
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 700;
-  line-height: 20px;
+  line-height: 24px;
   text-align: center;
+}
+
+@media (min-width: 900px) {
+  /* Dims the page below the header only; the header stays readable. */
+  .menu-backdrop {
+    position: absolute;
+    top: 100%;
+    bottom: auto;
+    height: 100vh;
+  }
+
+  .menu-panel {
+    position: absolute;
+    top: 100%;
+    bottom: auto;
+    inset-inline: 0;
+    width: auto;
+    max-height: min(72vh, 640px);
+    border-top: 1px solid var(--color-divider);
+    box-shadow: 0 24px 40px rgba(22, 21, 20, 0.16);
+    transform: translateY(-8px);
+    opacity: 0;
+    transition: transform 0.2s ease, opacity 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .menu-panel.is-open {
+    transform: none;
+    opacity: 1;
+    transition: transform 0.2s ease, opacity 0.2s ease, visibility 0s;
+  }
+
+  /* The hamburger above turns into the X here, so no second one. */
+  .menu-head { display: none; }
+
+  /* One column per category, quick links in a column at the end. */
+  .menu-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 230px;
+    gap: 36px;
+    width: 100%;
+    max-width: var(--page-max);
+    margin-inline: auto;
+    padding: 26px var(--shell-pad) 30px;
+  }
+  .menu-cats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 28px;
+  }
+  .menu-cat { padding: 0; border: 0; }
+  .menu-cat-title {
+    min-height: 44px;
+    padding-inline: 0;
+    border-bottom: 1px solid var(--color-divider);
+    border-radius: 0;
+    font-size: 17px;
+  }
+  .menu-cat-title:hover,
+  .menu-cat-title:focus-visible { background: none; color: var(--color-accent-700); }
+
+  /* Plain links listed under the heading on desktop. */
+  .menu-subs { flex-direction: column; flex-wrap: nowrap; gap: 0; margin-top: 6px; }
+  .chip.menu-sub {
+    min-height: 40px;
+    padding: 6px 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    text-align: start;
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--color-neutral-700);
+  }
+  .chip.menu-sub:hover,
+  .chip.menu-sub:focus-visible { background: none; color: var(--color-accent-700); }
+  .chip.menu-sub[aria-current='page'] { background: none; color: var(--color-accent-700); font-weight: 700; }
+
+  .menu-quick { padding-inline-start: 28px; border-inline-start: 1px solid var(--color-divider); }
+  .menu-quick-link { min-height: 44px; font-size: 15px; border-bottom: 0; border-radius: var(--radius-md); padding-inline: 8px; }
+  .menu-cart { margin-top: 10px; padding-inline: 12px; }
 }
 
 /* ---- Typography --------------------------------------------------------- */

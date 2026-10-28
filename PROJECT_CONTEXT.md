@@ -266,9 +266,10 @@ the base size. The storefront drops any cart line it can't price —
 - **Header markup must not depend on the route or the menu**: `render()`
   keeps the header (and the search input in it) in place only while
   `header()` returns the same HTML, and typing the first letter anywhere
-  switches the route to the shop. So the main navigation — category bar
-  (>= 900px, dropdown for a section with subcategories) and mobile drawer —
-  never bakes in the current page or open/closed state: `syncNav()` sets
+  switches the route to the shop. So the main navigation — the hamburger's
+  one menu panel (every category with all its subcategories, quick links,
+  cart; a wide panel under the header >= 900px, a drawer below) — never
+  bakes in the current page or open/closed state: `syncNav()` sets
   `aria-current` and the open classes on the existing nodes after each
   render, and opening/closing never calls `render()`.
   `test/storefront-nav.test.js` guards this.

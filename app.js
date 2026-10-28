@@ -261,6 +261,7 @@ const ICON_PATHS = {
   phone:
     '<path d="M13.83 16.57a1 1 0 0 0 1.21-.3l.36-.47A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.47.35a1 1 0 0 0-.29 1.23 14 14 0 0 0 6.39 6.39"/>',
   clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
   menu: '<line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="17" y2="17"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
 };
@@ -380,7 +381,7 @@ const state = {
   contactSent: false,
   contactError: '',
   contactSending: false, // true while /api/contact is in flight
-  menuOpen: false, // mobile drawer — applied to the header's nodes by applyMenu(), never through render()
+  menuOpen: false, // the hamburger's menu panel — applied to the header's nodes by applyMenu(), never through render()
   lightbox: null, // { id, index } while the full-screen photo popup is open
   selectedHeight: null, // chosen size on a product page with variants
   selectedColorIndex: 0, // chosen color on a product page with colors
@@ -848,9 +849,10 @@ function hydrateMedia(root = document) {
 
 /* ---- Shared chrome ------------------------------------------------------ */
 
-/** The site's sections, in menu order — the desktop category bar and the
- * mobile drawer are both built from this. `key` is what syncNav() matches
- * against navCurrentKey() to mark the current page. */
+/** Everything the menu lists: each category with all its subcategories,
+ * then the quick links. Both layouts of the menu panel (desktop columns,
+ * mobile drawer) are this one list. `key` is what syncNav() matches against
+ * navCurrentKey() to mark the current page. */
 function navItems() {
   const category = (col) => ({
     key: 'c:' + col,
@@ -863,50 +865,40 @@ function navItems() {
       href: '#/c/' + col + '/' + encodeURIComponent(s),
     })),
   });
-  return [
-    { key: 'home', label: 'خانه', href: '#/' },
-    { key: 'shop', label: 'فروشگاه', href: '#/shop' },
-    ...['lamps', 'shades', 'candles', 'decor'].map(category),
-    { key: 'about', label: 'درباره ما', href: '#/about' },
-    { key: 'faq', label: 'سوالات متداول', href: '#/faq' },
-    { key: 'contact', label: 'تماس', href: '#/contact' },
-  ];
+  return {
+    categories: ['lamps', 'shades', 'candles', 'decor'].map(category),
+    quick: [
+      { key: 'home', label: 'خانه', href: '#/', icon: 'home' },
+      { key: 'shop', label: 'همه‌ی محصولات', href: '#/shop', icon: 'grid' },
+      { key: 'about', label: 'درباره ما', href: '#/about', icon: 'heart' },
+      { key: 'faq', label: 'سوالات متداول', href: '#/faq', icon: 'help' },
+      { key: 'contact', label: 'تماس', href: '#/contact', icon: 'phone' },
+      { key: 'track', label: 'پیگیری سفارش', href: '#/track', icon: 'package' },
+    ],
+  };
 }
 
-// Nothing here depends on the route or on whether a menu is open: syncNav()
-// marks the current page and applies the open/closed state on these nodes
-// after every render, so neither ever changes header() — and the header,
-// with the search input in it, stays in place while someone types.
+// Nothing here depends on the route or on whether the menu is open:
+// syncNav() marks the current page and applies the open/closed state on
+// these nodes after every render, so neither ever changes header() — and the
+// header, with the search input in it, stays in place while someone types.
 function header() {
   const n = cartCount();
-  const items = navItems();
+  const { categories, quick } = navItems();
   const navAttrs = (it) =>
     `data-nav="${esc(it.href)}" data-nav-key="${esc(it.key)}"${it.section ? ` data-nav-section="${it.section}"` : ''}`;
 
-  const barItem = (it) =>
-    it.subs && it.subs.length
-      ? `
-        <li class="catbar-item" data-sub="${it.section}">
-          <button class="catbar-link" ${navAttrs(it)}>${esc(it.label)}</button>
-          <button class="catbar-toggle" type="button" data-act="nav-dropdown" data-id="${it.section}"
-                  aria-expanded="false" aria-controls="catbar-sub-${it.section}"
-                  aria-label="زیردسته‌های ${esc(it.label)}">${icon('chevronDown', 'icon icon-sm')}</button>
-          <div class="catbar-dropdown" id="catbar-sub-${it.section}">
-            ${it.subs.map((s) => `<button ${navAttrs(s)}>${esc(s.label)}</button>`).join('')}
-          </div>
-        </li>`
-      : `<li class="catbar-item"><button class="catbar-link" ${navAttrs(it)}>${esc(it.label)}</button></li>`;
-
-  const drawerItem = (it) =>
-    it.subs && it.subs.length
-      ? `
-        <div class="drawer-group">
-          <button class="drawer-link" ${navAttrs(it)}>${esc(it.label)}</button>
-          <div class="drawer-chips">
-            ${it.subs.map((s) => `<button class="chip chip-sm" ${navAttrs(s)}>${esc(s.label)}</button>`).join('')}
-          </div>
-        </div>`
-      : `<button class="drawer-link" ${navAttrs(it)}>${esc(it.label)}</button>`;
+  const categoryBlock = (c) => `
+          <section class="menu-cat">
+            <button class="menu-cat-title" ${navAttrs(c)}>${esc(c.label)}</button>
+            ${
+              c.subs.length
+                ? `<div class="menu-subs">${c.subs
+                    .map((s) => `<button class="chip menu-sub" ${navAttrs(s)}>${esc(s.label)}</button>`)
+                    .join('')}</div>`
+                : ''
+            }
+          </section>`;
 
   return `
     <div class="notice">
@@ -918,8 +910,8 @@ function header() {
         <div class="header-top">
           <div class="header-start">
             <button class="icon-btn menu-btn" id="menu-btn" data-act="menu" aria-label="باز کردن فهرست"
-                    aria-expanded="false" aria-controls="site-drawer">
-              ${icon('menu')}
+                    aria-expanded="false" aria-controls="site-menu">
+              ${icon('menu', 'icon icon-open')}${icon('x', 'icon icon-close')}
             </button>
           </div>
           <a class="wordmark" href="#/" aria-label="Glow Home Decor — خانه">
@@ -940,25 +932,24 @@ function header() {
             <input id="q" type="search" placeholder="جست‌وجو در محصولات" aria-label="جست‌وجو در محصولات">
           </div>
         </div>
-        <nav class="catbar" aria-label="بخش‌های فروشگاه">
-          <ul class="catbar-list">${items.map(barItem).join('')}</ul>
-        </nav>
       </div>
-      <div class="drawer-backdrop" data-act="menu-close"></div>
-      <div class="drawer" id="site-drawer" role="dialog" aria-modal="true" aria-label="فهرست فروشگاه">
-        <div class="drawer-head">
-          <span class="drawer-title">فهرست</span>
-          <button class="icon-btn" id="drawer-close" data-act="menu-close" aria-label="بستن فهرست">${icon('x')}</button>
+      <div class="menu-backdrop" data-act="menu-close"></div>
+      <div class="menu-panel" id="site-menu" role="dialog" aria-modal="true" aria-label="فهرست فروشگاه">
+        <div class="menu-head">
+          <span class="menu-title">فهرست</span>
+          <button class="icon-btn" id="menu-close" data-act="menu-close" aria-label="بستن فهرست">${icon('x')}</button>
         </div>
-        <nav class="drawer-nav" aria-label="بخش‌های فروشگاه">
-          ${items.map(drawerItem).join('')}
-        </nav>
-        <div class="drawer-foot">
-          <button class="drawer-foot-link" data-nav="#/track">${icon('package', 'icon icon-sm')}<span>پیگیری سفارش</span></button>
-          <button class="drawer-foot-link" data-nav="#/contact">${icon('phone', 'icon icon-sm')}<span>تماس با ما</span></button>
-          <button class="drawer-foot-link drawer-cart" data-nav="#/cart">${icon('bag', 'icon icon-sm')}<span>سبد خرید</span>
-            ${n ? `<span class="drawer-count">${FA(n)}</span>` : ''}
-          </button>
+        <div class="menu-body">
+          <nav class="menu-cats" aria-label="دسته‌بندی محصولات">${categories.map(categoryBlock).join('')}
+          </nav>
+          <nav class="menu-quick" aria-label="بخش‌های سایت">
+            ${quick
+              .map((q) => `<button class="menu-quick-link" ${navAttrs(q)}>${icon(q.icon, 'icon icon-sm')}<span>${esc(q.label)}</span></button>`)
+              .join('')}
+            <button class="menu-quick-link menu-cart" data-nav="#/cart" data-nav-key="cart">${icon('bag', 'icon icon-sm')}<span>سبد خرید</span>
+              ${n ? `<span class="menu-count">${FA(n)}</span>` : ''}
+            </button>
+          </nav>
         </div>
       </div>
     </header>`;
@@ -2344,12 +2335,6 @@ const ACTIONS = {
   // The menu never calls render(): see "Navigation menu" below.
   menu: () => setMenuOpen(!state.menuOpen),
   'menu-close': () => setMenuOpen(false),
-  // A dropdown opened by hovering stays open on click (the pointer was
-  // already over it); otherwise the arrow button toggles it.
-  'nav-dropdown': (id) => {
-    if (navDropdown && navDropdown.id === id && navDropdown.by !== 'hover') setDropdown(null);
-    else setDropdown(id, 'click');
-  },
 
   open: (id) => go('p/' + id),
 
@@ -2599,13 +2584,13 @@ const ACTIONS = {
 };
 
 document.addEventListener('click', (e) => {
-  if (navDropdown && !e.target.closest('.catbar-item.is-open')) setDropdown(null);
+  // A click outside the open menu (and not on the hamburger) closes it.
+  if (state.menuOpen && !e.target.closest('#site-menu, #menu-btn')) setMenuOpen(false);
   const navEl = e.target.closest('[data-nav]');
   if (navEl) {
     e.preventDefault();
     syncForm();
     setMenuOpen(false);
-    setDropdown(null);
     go(navEl.dataset.nav.replace(/^#\//, ''));
     return;
   }
@@ -2764,16 +2749,12 @@ document.addEventListener('input', (e) => {
 });
 
 /* ---- Navigation menu ------------------------------------------------------
-   Desktop (>= 900px): the category bar under the search, with a dropdown for
-   a section that has subcategories (آباژور). Mobile: the hamburger's
-   drawer. Both open and close by changing classes and attributes on the
-   header's existing nodes, never by render(): rebuilding the header would
-   replace the search input while someone types in it. */
-
-/** The open desktop dropdown: { id, by: 'hover' | 'focus' | 'click' }, or null. */
-let navDropdown = null;
-let navHoverTimer = null;
-const NAV_HOVER_CLOSE_MS = 150;
+   The hamburger, on every screen size, opens one panel listing every
+   category with all its subcategories and the quick links: a wide panel
+   under the header from 900px up, a full-height drawer below that (CSS
+   only — same nodes). It opens and closes by changing classes and
+   attributes on the header's existing nodes, never by render(): rebuilding
+   the header would replace the search input while someone types in it. */
 
 /** navItems() key of the current page, e.g. 'shop' or 'c:lamps/سفالی'. */
 function navCurrentKey() {
@@ -2783,16 +2764,16 @@ function navCurrentKey() {
   return state.route;
 }
 
-/** Section to underline in the bar: the collection being browsed, or the
- * product's own collection on a product page. */
+/** Category to mark: the collection being browsed, or the product's own
+ * collection on a product page. */
 function navCurrentSection() {
   if (state.route === 'collection') return state.filter;
   if (state.route === 'product') return byId(state.param)?.col || null;
   return null;
 }
 
-/** Mark the current page and re-apply the open menu/dropdown state — after
- * every render, since a rebuilt header comes back with them all closed. */
+/** Mark the current page and re-apply the open/closed state — after every
+ * render, since a rebuilt header comes back closed. */
 function syncNav() {
   const key = navCurrentKey();
   const section = navCurrentSection();
@@ -2801,14 +2782,13 @@ function syncNav() {
     if (el.dataset.navSection) el.classList.toggle('in-section', el.dataset.navSection === section);
   });
   applyMenu();
-  applyDropdown();
 }
 
 function applyMenu() {
   const open = state.menuOpen;
   // .menu-open locks page scroll and lifts the header above the tab bar.
   document.documentElement.classList.toggle('menu-open', open);
-  document.getElementById('site-drawer')?.classList.toggle('is-open', open);
+  document.getElementById('site-menu')?.classList.toggle('is-open', open);
   const btn = document.getElementById('menu-btn');
   if (btn) {
     btn.setAttribute('aria-expanded', String(open));
@@ -2816,84 +2796,36 @@ function applyMenu() {
   }
 }
 
+/** The panel's focusable items that are shown at this width (its own X
+ * button is hidden on desktop, where the hamburger itself turns into an X). */
+function menuFocusables(panel) {
+  return [...panel.querySelectorAll('button, a[href], input')].filter((el) => el.getClientRects().length);
+}
+
 function setMenuOpen(open) {
   if (state.menuOpen === open) return;
   state.menuOpen = open;
-  const drawer = document.getElementById('site-drawer');
-  const hadFocus = !!drawer && drawer.contains(document.activeElement);
+  const panel = document.getElementById('site-menu');
+  const hadFocus = !!panel && panel.contains(document.activeElement);
   applyMenu();
-  if (open) document.getElementById('drawer-close')?.focus();
+  if (open && panel) menuFocusables(panel)[0]?.focus();
   else if (hadFocus) document.getElementById('menu-btn')?.focus();
 }
 
-function applyDropdown() {
-  document.querySelectorAll('.catbar-item[data-sub]').forEach((item) => {
-    const open = !!navDropdown && navDropdown.id === item.dataset.sub;
-    item.classList.toggle('is-open', open);
-    item.querySelector('.catbar-toggle')?.setAttribute('aria-expanded', String(open));
-  });
-}
-
-function setDropdown(id, by) {
-  clearTimeout(navHoverTimer);
-  navDropdown = id ? { id, by } : null;
-  applyDropdown();
-}
-
-const subItem = (el) => (el && el.closest ? el.closest('.catbar-item[data-sub]') : null);
-
-// Hover opens a dropdown and leaving closes it — mouse only, so a tap on a
-// touch screen goes straight to the click.
-document.addEventListener('pointerover', (e) => {
-  if (e.pointerType !== 'mouse') return;
-  const item = subItem(e.target);
-  if (!item) return;
-  clearTimeout(navHoverTimer);
-  if (!navDropdown || navDropdown.id !== item.dataset.sub) setDropdown(item.dataset.sub, 'hover');
-});
-document.addEventListener('pointerout', (e) => {
-  if (e.pointerType !== 'mouse' || !navDropdown || navDropdown.by !== 'hover') return;
-  const item = subItem(e.target);
-  if (!item || item.contains(e.relatedTarget)) return;
-  clearTimeout(navHoverTimer);
-  navHoverTimer = setTimeout(() => setDropdown(null), NAV_HOVER_CLOSE_MS);
-});
-// Keyboard focus opens it (not a mouse click's focus — the click decides
-// then); focus leaving the item closes it.
-document.addEventListener('focusin', (e) => {
-  const item = subItem(e.target);
-  if (!item || (navDropdown && navDropdown.id === item.dataset.sub)) return;
-  if (e.target.matches(':focus-visible')) setDropdown(item.dataset.sub, 'focus');
-});
-document.addEventListener('focusout', (e) => {
-  const item = subItem(e.target);
-  if (!item || !navDropdown || navDropdown.id !== item.dataset.sub || navDropdown.by === 'hover') return;
-  if (!item.contains(e.relatedTarget)) setDropdown(null);
-});
-
 document.addEventListener('keydown', (e) => {
+  if (!state.menuOpen) return;
   if (e.key === 'Escape') {
-    if (state.menuOpen) {
-      setMenuOpen(false);
-      return;
-    }
-    if (navDropdown) {
-      // Focus goes back to the arrow before closing: focus arriving in a
-      // closed item would open it again.
-      const item = document.querySelector('.catbar-item.is-open');
-      if (item && item.contains(document.activeElement)) item.querySelector('.catbar-toggle')?.focus();
-      setDropdown(null);
-    }
+    setMenuOpen(false);
     return;
   }
-  // Keep Tab inside the open drawer (it is a modal dialog).
-  if (e.key === 'Tab' && state.menuOpen) {
-    const drawer = document.getElementById('site-drawer');
-    const els = drawer ? [...drawer.querySelectorAll('button, a[href], input')] : [];
+  // Keep Tab inside the open menu (it is a modal dialog).
+  if (e.key === 'Tab') {
+    const panel = document.getElementById('site-menu');
+    const els = panel ? menuFocusables(panel) : [];
     if (!els.length) return;
     const first = els[0];
     const last = els[els.length - 1];
-    if (!drawer.contains(document.activeElement)) {
+    if (!panel.contains(document.activeElement)) {
       e.preventDefault();
       first.focus();
     } else if (e.shiftKey && document.activeElement === first) {
@@ -2904,11 +2836,6 @@ document.addEventListener('keydown', (e) => {
       first.focus();
     }
   }
-});
-
-// The drawer is mobile-only: widening the window past it closes it.
-window.matchMedia?.('(min-width: 900px)').addEventListener?.('change', (e) => {
-  if (e.matches) setMenuOpen(false);
 });
 
 // Live search from the header, on every screen. render() leaves the header

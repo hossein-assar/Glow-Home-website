@@ -1,15 +1,18 @@
-// Main navigation in the storefront (app.js, a browser script): the desktop
-// category bar with its dropdowns and the mobile drawer. Its items and links
-// must stay what they were, opening and closing must never go through
-// render(), and the header markup must not depend on the menu or the route,
-// so the search input is never replaced while someone types. Runs the real
-// header(), render() and menu code, pulled out of the source text, against a
-// small fake DOM (no jsdom in this project).
+// Main navigation in the storefront (app.js, a browser script): the
+// hamburger's menu panel — a wide panel under the header from 900px up, a
+// full-height drawer below that, built from the same nodes. Every category
+// and every subcategory must be in it, linking where the menu always did;
+// opening and closing must never go through render(); and the header markup
+// must not depend on the menu or the route, so the search input is never
+// replaced while someone types. Runs the real header(), render(), click
+// handler and menu code, pulled out of the source text, against a small fake
+// DOM (no jsdom in this project).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const src = readFileSync(new URL('../../app.js', import.meta.url), 'utf8');
+const css = readFileSync(new URL('../../styles.css', import.meta.url), 'utf8');
 const dataSrc = readFileSync(new URL('../../data.js', import.meta.url), 'utf8');
 const grab = (re) => {
   const m = src.match(re);
@@ -21,12 +24,19 @@ const escSrc = grab(/const esc = \(s\) =>[\s\S]*?;\n/);
 const navSrc = grab(/\/\* ---- Navigation menu -[\s\S]*?(?=\/\/ Live search from the header)/);
 const renderSrc = grab(/let lastChrome = '';[\s\S]*?\nfunction render\(\) \{[\s\S]*?\n}\n/);
 const searchSrc = grab(/\/\/ Live search from the header[\s\S]*?document\.addEventListener\('input', \(e\) => \{\n  if \(e\.target\.id !== 'q'\) return;[\s\S]*?\n}\);\n/);
-const menuActionsSrc = grab(/ {2}\/\/ The menu never calls render\(\)[\s\S]*?'nav-dropdown': [\s\S]*?\n {2}},\n/);
+const clickSrc = grab(/document\.addEventListener\('click', \(e\) => \{\n  \/\/ A click outside the open menu[\s\S]*?\n}\);\n/);
+const menuActionsSrc = grab(/ {2}\/\/ The menu never calls render\(\)[\s\S]*?'menu-close': [^\n]*\n/);
 const { COLLECTIONS } = new Function(dataSrc + '\nreturn { COLLECTIONS };')();
 
-const SUBS = { lamps: ['سفالی', 'پلی استر', 'چوبی'], shades: [], candles: [], decor: [] };
+// Subcategories as in the live catalog.
+const SUBS = {
+  lamps: ['سفالی', 'پلی استر', 'چوبی'],
+  shades: ['ساده', 'گلدوزی'],
+  candles: ['شاتی', 'قلمی'],
+  decor: ['جا شمعی', 'ست پذیرایی'],
+};
 
-function headerFns(state) {
+function headerFns(state, subs = SUBS) {
   return new Function(
     'state', 'COLLECTIONS', 'subcategoriesFor', 'cartCount',
     `const COPY = { noticeBar: 'notice' };
@@ -36,65 +46,82 @@ function headerFns(state) {
      ${fnSrc('navItems')}
      ${fnSrc('header')}
      return { header };`
-  )(state, COLLECTIONS, (col) => SUBS[col] || [], () => Object.values(state.cart).reduce((a, b) => a + b, 0));
+  )(state, COLLECTIONS, (col) => subs[col] || [], () => Object.values(state.cart).reduce((a, b) => a + b, 0));
 }
 
 const baseState = () => ({ route: 'home', param: null, filter: 'all', subFilter: 'all', query: '', cart: {}, menuOpen: false, catalog: 'ready' });
 
-/** [label, href] of every nav button between two markers in header() output. */
-function links(html, from, to) {
-  const part = html.slice(html.indexOf(from), to ? html.indexOf(to) : undefined);
-  return [...part.matchAll(/<button[^>]*data-nav="([^"]*)"[^>]*>([^<]*)</g)].map((m) => [m[2], m[1]]);
-}
+/** [label, href] of every nav button in a part of header() output. */
+const links = (part) => [...part.matchAll(/<button[^>]*data-nav="([^"]*)"[^>]*>(?:<svg[^>]*><\/svg>)?(?:<span>)?([^<]*)</g)].map((m) => [m[2].trim(), m[1]]);
+const between = (html, from, to) => html.slice(html.indexOf(from), html.indexOf(to, html.indexOf(from)));
+const sub = (col, s) => [s, '#/c/' + col + '/' + encodeURIComponent(s)];
 
-const EXPECTED = [
-  ['خانه', '#/'],
-  ['فروشگاه', '#/shop'],
-  ['آباژور', '#/c/lamps'],
-  ['سفالی', '#/c/lamps/' + encodeURIComponent('سفالی')],
-  ['پلی استر', '#/c/lamps/' + encodeURIComponent('پلی استر')],
-  ['چوبی', '#/c/lamps/' + encodeURIComponent('چوبی')],
-  ['شید', '#/c/shades'],
-  ['شمع', '#/c/candles'],
-  ['اکسسوری منزل', '#/c/decor'],
-  ['درباره ما', '#/about'],
-  ['سوالات متداول', '#/faq'],
-  ['تماس', '#/contact'],
-];
-
-test('the category bar and the drawer list the same items, linking where the menu always did', () => {
-  const { header } = headerFns(baseState());
-  const html = header();
-  assert.deepEqual(links(html, 'class="catbar"', 'class="drawer-backdrop"'), EXPECTED);
-  assert.deepEqual(links(html, 'class="drawer-nav"', 'class="drawer-foot"'), EXPECTED);
+test('the menu lists every category with all its subcategories, linking where the menu always did', () => {
+  const html = headerFns(baseState()).header();
+  assert.deepEqual(links(between(html, 'class="menu-cats"', '</nav>')), [
+    ['آباژور', '#/c/lamps'], sub('lamps', 'سفالی'), sub('lamps', 'پلی استر'), sub('lamps', 'چوبی'),
+    ['شید', '#/c/shades'], sub('shades', 'ساده'), sub('shades', 'گلدوزی'),
+    ['شمع', '#/c/candles'], sub('candles', 'شاتی'), sub('candles', 'قلمی'),
+    ['اکسسوری منزل', '#/c/decor'], sub('decor', 'جا شمعی'), sub('decor', 'ست پذیرایی'),
+  ]);
+  // Each category is its own block: heading first, its subcategories right under it.
+  const blocks = [...html.matchAll(/<section class="menu-cat">([\s\S]*?)<\/section>/g)].map((m) => links(m[1]).map(([, href]) => href));
+  assert.equal(blocks.length, 4);
+  for (const b of blocks) assert.ok(b.slice(1).every((h) => h.startsWith(b[0] + '/')), b.join(' '));
 });
 
-test('the drawer footer links to order tracking, contact and the cart, with the cart count', () => {
+test('a category with no subcategories is still listed, as a heading alone', () => {
+  const html = headerFns(baseState(), { lamps: ['سفالی'] }).header();
+  assert.deepEqual(links(between(html, 'class="menu-cats"', '</nav>')).map(([, h]) => h), [
+    '#/c/lamps', '#/c/lamps/' + encodeURIComponent('سفالی'), '#/c/shades', '#/c/candles', '#/c/decor',
+  ]);
+});
+
+test('quick links and the cart, with its count', () => {
   const state = baseState();
   const { header } = headerFns(state);
-  const foot = (h) => h.slice(h.indexOf('class="drawer-foot"'));
-  const navs = (h) => [...foot(h).matchAll(/data-nav="([^"]*)"/g)].map((m) => m[1]);
-  assert.deepEqual(navs(header()), ['#/track', '#/contact', '#/cart']);
-  assert.match(foot(header()), /پیگیری سفارش[\s\S]*تماس با ما[\s\S]*سبد خرید/);
-  assert.doesNotMatch(foot(header()), /drawer-count/);
+  const quick = () => between(header(), 'class="menu-quick"', '</nav>');
+  assert.deepEqual(links(quick()), [
+    ['خانه', '#/'],
+    ['همه‌ی محصولات', '#/shop'],
+    ['درباره ما', '#/about'],
+    ['سوالات متداول', '#/faq'],
+    ['تماس', '#/contact'],
+    ['پیگیری سفارش', '#/track'],
+    ['سبد خرید', '#/cart'],
+  ]);
+  assert.doesNotMatch(quick(), /menu-count/);
   state.cart = { lale: 2, abrak: 1 };
-  assert.match(foot(header()), /<span class="drawer-count">3<\/span>/);
+  assert.match(quick(), /<span class="menu-count">3<\/span>/);
   assert.match(header(), /<span class="badge">3<\/span>/, 'header cart badge');
+});
+
+test('one panel serves both layouts, and the CSS never hides any of its links', () => {
+  const html = headerFns(baseState()).header();
+  assert.equal(html.match(/id="site-menu"/g).length, 1);
+  assert.doesNotMatch(html, /catbar|accordion|aria-expanded="false" aria-controls="menu-sub/);
+  const navs = [...html.matchAll(/data-nav="/g)].length;
+  assert.equal(navs, links(between(html, 'id="site-menu"', '</header>')).length, 'nav links outside the panel');
+  // No rule hides categories, subcategories or quick links at any width.
+  for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+    if (/\.menu-(cats|cat|cat-title|subs|sub|quick|quick-link|cart|body)\b/.test(m[1])) {
+      assert.doesNotMatch(m[2], /display:\s*none|visibility:\s*hidden/, m[1].trim());
+    }
+  }
 });
 
 test('header markup does not depend on the menu or on the route', () => {
   const state = baseState();
   const { header } = headerFns(state);
   const first = header();
-  const variants = [
+  for (const v of [
     { menuOpen: true },
     { route: 'shop' },
     { route: 'collection', filter: 'lamps' },
     { route: 'collection', filter: 'lamps', subFilter: 'سفالی' },
     { route: 'product', param: 'lale' },
-    { route: 'about', menuOpen: true },
-  ];
-  for (const v of variants) {
+    { route: 'track', menuOpen: true },
+  ]) {
     Object.assign(state, baseState(), v);
     assert.equal(header(), first, JSON.stringify(v));
   }
@@ -103,7 +130,7 @@ test('header markup does not depend on the menu or on the route', () => {
 /* ---- A small fake DOM for the menu code ---------------------------------- */
 
 function makeDom() {
-  const doc = { listeners: {}, activeElement: null, focusVisible: false };
+  const doc = { listeners: {}, activeElement: null };
   const all = [];
   class El {
     constructor(tag, { id = '', cls = [], data = {}, attrs = {} } = {}, children = []) {
@@ -119,12 +146,11 @@ function makeDom() {
     setAttribute(k, v) { this.attrs[k] = String(v); }
     getAttribute(k) { return this.attrs[k] ?? null; }
     focus() { doc.activeElement = this; }
+    getClientRects() { return this.hidden ? [] : [{}]; }
     contains(o) { for (let n = o; n; n = n.parent) if (n === this) return true; return false; }
     matches(sel) {
       return sel.split(',').some((s) => {
-        s = s.trim();
-        if (s === ':focus-visible') return doc.focusVisible && doc.activeElement === this;
-        const m = s.match(/^([a-z]+)?((?:[.#][\w-]+|\[[\w-]+(?:="[^"]*")?\])*)$/);
+        const m = s.trim().match(/^([a-z]+)?((?:[.#][\w-]+|\[[\w-]+(?:="[^"]*")?\])*)$/);
         if (!m) throw new Error('fake DOM cannot match ' + s);
         if (m[1] && m[1] !== this.tag) return false;
         return [...m[2].matchAll(/\.([\w-]+)|#([\w-]+)|\[([\w-]+)(?:="([^"]*)")?\]/g)].every(([, c, i, a, v]) => {
@@ -140,24 +166,25 @@ function makeDom() {
     querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
   }
   const el = (tag, opts, children) => new El(tag, opts, children);
-  const lamps = el('li', { cls: ['catbar-item'], data: { sub: 'lamps' } }, [
-    el('button', { cls: ['catbar-link'], data: { navKey: 'c:lamps', navSection: 'lamps' } }),
-    el('button', { cls: ['catbar-toggle'], attrs: { 'aria-expanded': 'false' } }),
-    el('div', { cls: ['catbar-dropdown'] }, [el('button', { data: { navKey: 'c:lamps/سفالی' } })]),
-  ]);
-  const drawer = el('div', { id: 'site-drawer', cls: ['drawer'] }, [
-    el('button', { id: 'drawer-close' }),
-    el('button', { cls: ['drawer-link'], data: { navKey: 'home' } }),
-    el('button', { cls: ['drawer-link'], data: { navKey: 'c:lamps', navSection: 'lamps' } }),
-    el('button', { cls: ['drawer-foot-link'] }),
+  const panel = el('div', { id: 'site-menu', cls: ['menu-panel'] }, [
+    el('div', { cls: ['menu-head'] }, [el('button', { id: 'menu-close', data: { act: 'menu-close' } })]),
+    el('section', { cls: ['menu-cat'] }, [
+      el('button', { data: { nav: '#/c/lamps', navKey: 'c:lamps', navSection: 'lamps' } }),
+      el('button', { data: { nav: '#/c/lamps/x', navKey: 'c:lamps/سفالی' } }),
+    ]),
+    el('nav', { cls: ['menu-quick'] }, [
+      el('button', { data: { nav: '#/', navKey: 'home' } }),
+      el('button', { data: { nav: '#/cart', navKey: 'cart' } }),
+    ]),
   ]);
   const root = el('html', {}, [
     el('header', {}, [
-      el('button', { id: 'menu-btn', attrs: { 'aria-expanded': 'false' } }),
+      el('button', { id: 'menu-btn', data: { act: 'menu' }, attrs: { 'aria-expanded': 'false' } }),
       el('input', { id: 'q' }),
-      el('ul', { cls: ['catbar-list'] }, [el('li', { cls: ['catbar-item'] }, [el('button', { data: { navKey: 'shop' } })]), lamps]),
-      drawer,
+      el('div', { cls: ['menu-backdrop'], data: { act: 'menu-close' } }),
+      panel,
     ]),
+    el('main', {}, [el('p', { id: 'page-text' })]),
   ]);
   doc.documentElement = root;
   doc.getElementById = (id) => all.find((e) => e.id === id && root.contains(e)) || null;
@@ -169,69 +196,116 @@ function makeDom() {
     (doc.listeners[type] || []).forEach((fn) => fn(ev));
     return ev;
   };
-  return { doc, el, root, lamps, drawer, fire, byId: doc.getElementById };
+  return { doc, root, panel, fire, byId: doc.getElementById };
 }
 
 function menu(dom, state = baseState()) {
   let renders = 0;
-  const win = { matchMedia: () => ({ addEventListener() {} }) };
+  const went = [];
   const fns = new Function(
-    'document', 'window', 'state', 'byId', 'render',
+    'document', 'state', 'byId', 'render', 'go', 'syncForm',
     `${navSrc}
      const ACTIONS = {
      ${menuActionsSrc}
      };
-     return { ACTIONS, syncNav, getDropdown: () => navDropdown };`
-  )(dom.doc, win, state, (id) => (id === 'lale' ? { col: 'candles' } : null), () => renders++);
-  return { ...fns, state, renders: () => renders };
+     ${clickSrc}
+     return { ACTIONS, syncNav };`
+  )(dom.doc, state, (id) => (id === 'lale' ? { col: 'candles' } : null), () => renders++, (p) => went.push(p), () => {});
+  const isOpen = () => state.menuOpen && dom.panel.classList.contains('is-open') && dom.root.classList.contains('menu-open');
+  const isClosed = () => !state.menuOpen && !dom.panel.classList.contains('is-open') && !dom.root.classList.contains('menu-open');
+  return { ...fns, state, went, isOpen, isClosed, renders: () => renders };
 }
 
-test('the hamburger opens the drawer and the close button / backdrop closes it, without render()', () => {
+test('the hamburger opens the panel; the X, the backdrop and the hamburger close it — never through render()', () => {
   const dom = makeDom();
   const m = menu(dom);
   const box = dom.byId('q');
+  const btn = dom.byId('menu-btn');
   m.syncNav();
-  m.ACTIONS.menu();
-  assert.equal(m.state.menuOpen, true);
-  assert.ok(dom.root.classList.contains('menu-open'), 'page scroll lock');
-  assert.ok(dom.drawer.classList.contains('is-open'));
-  assert.equal(dom.byId('menu-btn').getAttribute('aria-expanded'), 'true');
-  assert.equal(dom.doc.activeElement, dom.byId('drawer-close'), 'focus moves into the drawer');
 
-  m.ACTIONS['menu-close'](); // the X button and the backdrop
-  assert.equal(m.state.menuOpen, false);
-  assert.ok(!dom.root.classList.contains('menu-open'));
-  assert.ok(!dom.drawer.classList.contains('is-open'));
-  assert.equal(dom.byId('menu-btn').getAttribute('aria-expanded'), 'false');
-  assert.equal(dom.doc.activeElement, dom.byId('menu-btn'), 'focus returns to the hamburger');
+  dom.fire('click', btn);
+  assert.ok(m.isOpen(), 'open, page scroll locked');
+  assert.equal(btn.getAttribute('aria-expanded'), 'true');
+  assert.equal(btn.getAttribute('aria-label'), 'بستن فهرست');
+  assert.equal(dom.doc.activeElement, dom.byId('menu-close'), 'focus moves into the panel');
 
-  m.ACTIONS.menu();
-  m.ACTIONS.menu(); // the hamburger toggles
-  assert.equal(m.state.menuOpen, false);
+  dom.fire('click', dom.byId('menu-close'));
+  assert.ok(m.isClosed());
+  assert.equal(btn.getAttribute('aria-expanded'), 'false');
+  assert.equal(dom.doc.activeElement, btn, 'focus returns to the hamburger');
+
+  dom.fire('click', btn);
+  dom.fire('click', dom.root.querySelector('.menu-backdrop'));
+  assert.ok(m.isClosed(), 'backdrop');
+
+  dom.fire('click', btn);
+  dom.fire('click', btn);
+  assert.ok(m.isClosed(), 'the hamburger toggles');
   assert.equal(m.renders(), 0, 'menu called render()');
   assert.equal(dom.byId('q'), box);
 });
 
-test('Esc closes the drawer; Tab stays inside it while open', () => {
+test('a click outside the panel closes it; a click inside does not', () => {
   const dom = makeDom();
   const m = menu(dom);
-  m.ACTIONS.menu();
-  const last = dom.drawer.querySelector('.drawer-foot-link');
+  dom.fire('click', dom.byId('menu-btn'));
+  dom.fire('click', dom.panel.querySelector('.menu-head'));
+  assert.ok(m.isOpen(), 'click inside the panel closed it');
+  dom.fire('click', dom.byId('page-text'));
+  assert.ok(m.isClosed());
+  dom.fire('click', dom.byId('menu-btn'));
+  dom.fire('click', dom.byId('q')); // the search box, outside the panel
+  assert.ok(m.isClosed());
+  assert.equal(m.renders(), 0);
+});
+
+test('choosing a category, subcategory or quick link closes the panel and goes there', () => {
+  const dom = makeDom();
+  const m = menu(dom);
+  for (const key of ['c:lamps', 'c:lamps/سفالی', 'cart']) {
+    dom.fire('click', dom.byId('menu-btn'));
+    dom.fire('click', dom.panel.querySelector(`[data-nav-key="${key}"]`));
+    assert.ok(m.isClosed(), key);
+  }
+  assert.deepEqual(m.went, ['c/lamps', 'c/lamps/x', 'cart']);
+});
+
+test('Esc closes the panel; Tab stays inside it while open', () => {
+  const dom = makeDom();
+  const m = menu(dom);
+  dom.fire('click', dom.byId('menu-btn'));
+  const last = dom.panel.querySelector('[data-nav-key="cart"]');
   last.focus();
   const tab = dom.fire('keydown', last, { key: 'Tab', shiftKey: false });
   assert.ok(tab.defaultPrevented);
-  assert.equal(dom.doc.activeElement, dom.byId('drawer-close'), 'Tab wraps to the first item');
+  assert.equal(dom.doc.activeElement, dom.byId('menu-close'), 'Tab wraps to the first item');
   dom.fire('keydown', dom.doc.activeElement, { key: 'Tab', shiftKey: true });
   assert.equal(dom.doc.activeElement, last, 'Shift+Tab wraps to the last item');
 
   dom.fire('keydown', last, { key: 'Escape' });
-  assert.equal(m.state.menuOpen, false);
-  assert.ok(!dom.drawer.classList.contains('is-open'));
+  assert.ok(m.isClosed());
   assert.equal(dom.doc.activeElement, dom.byId('menu-btn'));
+
+  const closedTab = dom.fire('keydown', dom.byId('q'), { key: 'Tab', shiftKey: false });
+  assert.ok(!closedTab.defaultPrevented, 'Tab trapped while closed');
   assert.equal(m.renders(), 0);
 });
 
-test('a closed drawer does not take focus back from where the visitor is', () => {
+test('on open, focus goes to the first item shown (the panel X is hidden on desktop)', () => {
+  const dom = makeDom();
+  const m = menu(dom);
+  dom.byId('menu-close').hidden = true;
+  dom.fire('click', dom.byId('menu-btn'));
+  const first = dom.panel.querySelector('[data-nav-key="c:lamps"]');
+  assert.equal(dom.doc.activeElement, first);
+  const last = dom.panel.querySelector('[data-nav-key="cart"]');
+  last.focus();
+  dom.fire('keydown', last, { key: 'Tab', shiftKey: false });
+  assert.equal(dom.doc.activeElement, first, 'Tab wrapped onto the hidden X');
+  assert.ok(m.isOpen());
+});
+
+test('closing does not take focus back from where the visitor is', () => {
   const dom = makeDom();
   const m = menu(dom);
   m.ACTIONS.menu();
@@ -240,67 +314,7 @@ test('a closed drawer does not take focus back from where the visitor is', () =>
   assert.equal(dom.doc.activeElement, dom.byId('q'));
 });
 
-test('the آباژور dropdown: arrow toggles it, Esc closes it and puts focus on the arrow', () => {
-  const dom = makeDom();
-  const m = menu(dom);
-  const toggle = dom.lamps.querySelector('.catbar-toggle');
-  m.ACTIONS['nav-dropdown']('lamps');
-  assert.ok(dom.lamps.classList.contains('is-open'));
-  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
-  m.ACTIONS['nav-dropdown']('lamps');
-  assert.ok(!dom.lamps.classList.contains('is-open'));
-  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
-
-  m.ACTIONS['nav-dropdown']('lamps');
-  const sub = dom.lamps.querySelector('.catbar-dropdown').children[0];
-  sub.focus();
-  dom.fire('keydown', sub, { key: 'Escape' });
-  assert.ok(!dom.lamps.classList.contains('is-open'));
-  assert.equal(dom.doc.activeElement, toggle);
-  assert.equal(m.getDropdown(), null, 'focus on the arrow re-opened it');
-  assert.equal(m.renders(), 0);
-});
-
-test('the dropdown opens on keyboard focus and closes when focus leaves the item', () => {
-  const dom = makeDom();
-  const m = menu(dom);
-  const link = dom.lamps.querySelector('.catbar-link');
-  dom.doc.focusVisible = false; // a mouse click's focus: the click decides
-  link.focus();
-  dom.fire('focusin', link);
-  assert.ok(!dom.lamps.classList.contains('is-open'));
-
-  dom.doc.focusVisible = true; // Tab
-  dom.fire('focusin', link);
-  assert.ok(dom.lamps.classList.contains('is-open'));
-  const sub = dom.lamps.querySelector('.catbar-dropdown').children[0];
-  dom.fire('focusout', link, { relatedTarget: sub });
-  assert.ok(dom.lamps.classList.contains('is-open'), 'moving into the dropdown keeps it open');
-  dom.fire('focusout', sub, { relatedTarget: dom.byId('q') });
-  assert.ok(!dom.lamps.classList.contains('is-open'));
-});
-
-test('hover opens the dropdown, a click on the arrow keeps it open, leaving closes a hover-opened one', async () => {
-  const dom = makeDom();
-  const m = menu(dom);
-  const link = dom.lamps.querySelector('.catbar-link');
-  dom.fire('pointerover', link, { pointerType: 'touch' });
-  assert.ok(!dom.lamps.classList.contains('is-open'), 'touch does not hover');
-  dom.fire('pointerover', link, { pointerType: 'mouse' });
-  assert.ok(dom.lamps.classList.contains('is-open'));
-  dom.fire('pointerout', link, { pointerType: 'mouse', relatedTarget: dom.byId('q') });
-  await new Promise((r) => setTimeout(r, 200));
-  assert.ok(!dom.lamps.classList.contains('is-open'));
-
-  dom.fire('pointerover', link, { pointerType: 'mouse' });
-  m.ACTIONS['nav-dropdown']('lamps');
-  assert.ok(dom.lamps.classList.contains('is-open'), 'click on a hover-opened dropdown closed it');
-  dom.fire('pointerout', link, { pointerType: 'mouse', relatedTarget: dom.byId('q') });
-  await new Promise((r) => setTimeout(r, 200));
-  assert.ok(dom.lamps.classList.contains('is-open'), 'a clicked-open dropdown stays until Esc / outside click');
-});
-
-test('syncNav marks the current page and its section', () => {
+test('syncNav marks the current page and its category, and keeps the menu state on a rebuilt header', () => {
   const dom = makeDom();
   const m = menu(dom);
   const cur = () => dom.doc.querySelectorAll('[data-nav-key]').filter((e) => e.getAttribute('aria-current') === 'page').map((e) => e.dataset.navKey);
@@ -310,15 +324,19 @@ test('syncNav marks the current page and its section', () => {
   assert.deepEqual(cur(), ['home']);
   Object.assign(m.state, { route: 'collection', filter: 'lamps', subFilter: 'all' });
   m.syncNav();
-  assert.deepEqual(cur(), ['c:lamps', 'c:lamps']);
+  assert.deepEqual(cur(), ['c:lamps']);
   Object.assign(m.state, { subFilter: 'سفالی' });
   m.syncNav();
   assert.deepEqual(cur(), ['c:lamps/سفالی']);
-  assert.equal(inSection(), 2, 'آباژور marked as the section in the bar and the drawer');
-  Object.assign(m.state, { route: 'shop' });
+  assert.equal(inSection(), 1);
+  Object.assign(m.state, { route: 'cart' });
   m.syncNav();
-  assert.deepEqual(cur(), ['shop']);
+  assert.deepEqual(cur(), ['cart']);
   assert.equal(inSection(), 0);
+
+  m.state.menuOpen = true; // as after a header rebuild with the menu open
+  m.syncNav();
+  assert.ok(m.isOpen());
 });
 
 /* ---- With the real header() and render() --------------------------------- */
@@ -359,12 +377,11 @@ test('typing in the search box: opening, closing and Esc on the menu keep the sa
   doc.querySelector = () => null;
   doc.addEventListener = (type, fn) => (doc.listeners[type] ||= []).push(fn);
   const $ = (sel) => (sel === '#app' ? app : sel === '#app > header' ? app.nodes.find((n) => n.tag === 'header') || null : null);
-  const win = { matchMedia: () => ({ addEventListener() {} }) };
 
   const state = baseState();
   let renders = 0;
   const env = new Function(
-    'document', 'window', '$', 'state', 'go', 'COLLECTIONS', 'subcategoriesFor', 'onRender',
+    'document', '$', 'state', 'go', 'COLLECTIONS', 'subcategoriesFor', 'onRender',
     `const SCREENS = { home: () => 'HOME', shop: () => 'SHOP[' + state.query + ']' };
      const TITLES = { home: 'h' };
      const screenHome = SCREENS.home;
@@ -388,7 +405,7 @@ test('typing in the search box: opening, closing and Esc on the menu keep the sa
      ${menuActionsSrc}
      };
      return { render, ACTIONS };`
-  ).call(null, doc, win, $, state, (route) => {
+  )(doc, $, state, (route) => {
     state.route = route;
     env.render();
   }, COLLECTIONS, (col) => SUBS[col] || [], () => renders++);
@@ -401,15 +418,13 @@ test('typing in the search box: opening, closing and Esc on the menu keep the sa
     (doc.listeners.input || []).forEach((fn) => fn({ target: box }));
   };
 
-  type('ش'); // home -> shop: the header (now route-independent) stays
+  type('ش'); // home -> shop: the header (route-independent) stays
   assert.equal(state.route, 'shop');
   const before = renders;
   env.ACTIONS.menu();
   env.ACTIONS['menu-close']();
   env.ACTIONS.menu();
   (doc.listeners.keydown || []).forEach((fn) => fn({ key: 'Escape', target: box, preventDefault() {} }));
-  env.ACTIONS['nav-dropdown']('lamps');
-  env.ACTIONS['nav-dropdown']('lamps');
   assert.equal(renders, before, 'the menu re-rendered the page');
   assert.equal(state.menuOpen, false);
 
