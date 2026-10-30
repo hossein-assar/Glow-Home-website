@@ -12,6 +12,7 @@
 // request cannot change what anyone actually gets charged.
 
 const { createClient } = require('@supabase/supabase-js');
+const { emailConfigured, sendShopEmail } = require('./_email');
 
 const SUPABASE_URL = 'https://sgfoesnpodvwyzlxfhtq.supabase.co';
 
@@ -215,12 +216,11 @@ function toman(n) {
 }
 
 // Best-effort admin notification — never allowed to affect the checkout
-// response either way. Uses a plain fetch() to Resend's API rather than
-// pulling in a new npm dependency for one call.
+// response either way. Sent through ./_email.js (Resend over a plain
+// fetch(), sender from EMAIL_FROM, to ORDER_NOTIFY_EMAIL); skipped quietly
+// when RESEND_API_KEY / ORDER_NOTIFY_EMAIL are not set.
 async function sendOrderNotificationEmail(order, orderItems) {
-  const apiKey = process.env.RESEND_API_KEY;
-  const notifyTo = process.env.ORDER_NOTIFY_EMAIL;
-  if (!apiKey || !notifyTo) return;
+  if (!emailConfigured()) return;
 
   const itemsHtml = orderItems
     .map(
@@ -241,24 +241,7 @@ async function sendOrderNotificationEmail(order, orderItems) {
     </div>
   `;
 
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: 'Glow Home <onboarding@resend.dev>',
-      to: [notifyTo],
-      subject: `سفارش جدید — ${order.code}`,
-      html,
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Resend API responded ${res.status}: ${text}`);
-  }
+  await sendShopEmail({ subject: `سفارش جدید — ${order.code}`, html });
 }
 
 module.exports = async (req, res) => {

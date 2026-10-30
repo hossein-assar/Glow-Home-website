@@ -9,6 +9,10 @@ import { readFileSync } from 'node:fs';
 
 import { SHADE_TYPES, priceCart, validateCheckoutBody } from '../src/pricing.js';
 import { tomanToGatewayAmount } from '../src/config.js';
+import { createRequire } from 'node:module';
+
+// api/orders.js sends its email through the shared api/_email.js.
+const requireReal = createRequire(import.meta.url);
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
@@ -16,6 +20,7 @@ function loadOrdersJs() {
   const mod = { exports: {} };
   const stubRequire = (id) => {
     if (id === '@supabase/supabase-js') return { createClient() { throw new Error('no db in tests'); } };
+    if (id === './_email') return requireReal('../../api/_email.js');
     throw new Error('unexpected require ' + id);
   };
   new Function('require', 'module', 'exports', read('../../api/orders.js'))(stubRequire, mod, mod.exports);

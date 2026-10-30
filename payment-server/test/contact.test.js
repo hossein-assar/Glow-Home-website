@@ -85,6 +85,7 @@ beforeEach(() => {
   realFetch = globalThis.fetch;
   globalThis.fetch = (...a) => fetchImpl(...a);
   realEnv = { ...process.env };
+  delete process.env.EMAIL_FROM;
   process.env.RESEND_API_KEY = 're_test_secret_key';
   process.env.ORDER_NOTIFY_EMAIL = 'shop@example.com';
   logged = [];
@@ -122,16 +123,18 @@ test('valid POST sends one email to ORDER_NOTIFY_EMAIL via Resend', async () => 
   assert.equal(sent[0].url, 'https://api.resend.com/emails');
   assert.equal(sent[0].headers.Authorization, 'Bearer re_test_secret_key');
   assert.deepEqual(sent[0].body.to, ['shop@example.com']);
-  assert.equal(sent[0].body.from, 'Glow Home <onboarding@resend.dev>'); // same sender as order emails
+  assert.equal(sent[0].body.from, 'Glow Home <onboarding@resend.dev>'); // EMAIL_FROM unset: Resend's testing sender
   assert.equal(sent[0].body.subject, 'پیام جدید از فرم تماس');
   assert.ok(sent[0].body.html.includes('سارا'));
   assert.ok(sent[0].body.html.includes('09121234567'));
 });
 
-test('sender is the same as in api/orders.js', () => {
-  const orders = readFileSync(new URL('../../api/orders.js', import.meta.url), 'utf8');
-  assert.ok(orders.includes("from: 'Glow Home <onboarding@resend.dev>'"));
-  assert.ok(orders.includes('process.env.ORDER_NOTIFY_EMAIL'));
+test('sends through the same shared sender as api/orders.js', () => {
+  for (const file of ['contact.js', 'orders.js']) {
+    const src = readFileSync(new URL('../../api/' + file, import.meta.url), 'utf8');
+    assert.match(src, /require\('\.\/_email'\)/, file);
+    assert.match(src, /sendShopEmail\(/, file);
+  }
 });
 
 test('strict CORS: other or missing origins are refused, nothing sent', async () => {

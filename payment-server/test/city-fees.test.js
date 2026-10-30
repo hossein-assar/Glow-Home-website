@@ -13,6 +13,10 @@ import {
 } from '../src/pricing.js';
 import { tomanToGatewayAmount } from '../src/config.js';
 import { createApp } from '../src/app.js';
+import { createRequire } from 'node:module';
+
+// api/orders.js sends its email through the shared api/_email.js.
+const requireReal = createRequire(import.meta.url);
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const appJs = read('../../app.js');
@@ -161,6 +165,7 @@ async function postOrder({ city, extra = {} }) {
   const mod = { exports: {} };
   const stubRequire = (id) => {
     if (id === '@supabase/supabase-js') return { createClient: () => sb };
+    if (id === './_email') return requireReal('../../api/_email.js');
     throw new Error('unexpected require ' + id);
   };
   new Function('require', 'module', 'exports', ordersJs)(stubRequire, mod, mod.exports);

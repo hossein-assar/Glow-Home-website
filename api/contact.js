@@ -2,8 +2,9 @@
 //
 // Sends the contact form to the shop by email. Same mechanism as the
 // new-order email in /api/orders.js: Resend's API over a plain fetch(), with
-// RESEND_API_KEY and ORDER_NOTIFY_EMAIL from Vercel's environment variables
-// (never in code), to the same address new orders go to.
+// RESEND_API_KEY, ORDER_NOTIFY_EMAIL and EMAIL_FROM from Vercel's environment
+// variables (never in code), to the same address new orders go to — all
+// through the shared sender in ./_email.js.
 //
 // Unlike the order email (best-effort, never allowed to break checkout),
 // here the email IS the whole job — so a missing key or a failed send is
@@ -13,6 +14,8 @@
 // (www.glow-home.ir redirects there), a hidden honeypot field, a per-IP rate
 // limit, length limits, and every user value is HTML-escaped in the email.
 // Internal details only go to the server log, never to the client.
+
+const { sendShopEmail } = require('./_email');
 
 const ALLOWED_ORIGIN = 'https://glow-home.ir';
 
@@ -106,30 +109,10 @@ function buildEmail({ name, mobile, message }) {
   return { subject: SUBJECT, html };
 }
 
+// Throws when RESEND_API_KEY / ORDER_NOTIFY_EMAIL are missing or Resend
+// refuses — the handler turns that into a generic error for the client.
 async function sendContactEmail(value) {
-  const apiKey = process.env.RESEND_API_KEY;
-  const notifyTo = process.env.ORDER_NOTIFY_EMAIL;
-  if (!apiKey || !notifyTo) throw new Error('RESEND_API_KEY or ORDER_NOTIFY_EMAIL is not set');
-
-  const { subject, html } = buildEmail(value);
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: 'Glow Home <onboarding@resend.dev>',
-      to: [notifyTo],
-      subject,
-      html,
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Resend API responded ${res.status}: ${text}`);
-  }
+  await sendShopEmail(buildEmail(value));
 }
 
 const SEND_FAILED = 'ارسال پیام با خطا مواجه شد. لطفاً دوباره تلاش کنید یا از راه اینستاگرام یا تلفن با ما در تماس باشید.';

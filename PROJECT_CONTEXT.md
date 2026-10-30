@@ -114,9 +114,13 @@ decisions from code alone — read this before making structural changes.
   screenshot their cart and message a WhatsApp number — that flow and its
   icon/CSS (`whatsappIcon()`, `.whatsapp-number`) are gone entirely now.
 - **Order notifications**: `/api/orders.js` emails the shop on every new
-  order via Resend's API (plain `fetch()`, no SDK). Needs `RESEND_API_KEY`
-  and `ORDER_NOTIFY_EMAIL` set in Vercel's environment variables — never in
-  code. If either is missing, the notification step silently no-ops rather
+  order via Resend's API (plain `fetch()`, no SDK), through the shared
+  sender `api/_email.js`. Needs `RESEND_API_KEY` and `ORDER_NOTIFY_EMAIL`
+  set in Vercel's environment variables — never in code. The sender is
+  `EMAIL_FROM` (e.g. `Glow Home <orders@glow-home.ir>`, domain verified in
+  Resend); only when that is unset does it fall back to
+  `onboarding@resend.dev`, which Resend refuses (403) for anyone but the
+  account owner — so it must be set in Production. If the key or recipient is missing, the notification step silently no-ops rather
   than breaking checkout; a failed send (bad key, Resend outage, etc.) is
   caught and logged with `console.error` but never surfaces to the customer.
 - **Contact form**: `/api/contact.js` emails the shop through the same
