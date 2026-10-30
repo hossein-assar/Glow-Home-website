@@ -286,16 +286,15 @@ const SHIPPING = [
 
 const PAYMENTS = [
   { id: 'gateway', label: 'درگاه پرداخت آنلاین', note: 'زرین‌پال / آیدی‌پی' },
-  { id: 'card', label: 'کارت به کارت', note: 'شماره کارت را می‌فرستیم، فیش را برای ما بفرستید' },
+  { id: 'card', label: 'کارت به کارت', note: 'با ما تماس بگیرید؛ سفارش در سایت ثبت نمی‌شود' },
 ];
 
-// Online payment through ZarinPal (payment-server/, on the Iranian VPS).
-// OFF by default. While `enabled` is false, checkout behaves exactly as
-// before: every order, «درگاه پرداخت آنلاین» included, goes through
-// /api/orders. Turn on only after supabase/migration-online-payment.sql has
-// been run and payment-server is live (see payment-server/README.md).
-// When on, only «درگاه پرداخت آنلاین» goes to the payment server.
-// «کارت به کارت» still uses /api/orders.
+// Online payment through ZarinPal (payment-server/, on the Iranian VPS) —
+// the only way to place an order on the site. «کارت به کارت» places no
+// order: checkout asks the customer to contact the shop instead.
+// Setting `enabled` to false (e.g. while the payment server is down) stops
+// all ordering: checkout then shows the same "contact us" box for every
+// payment option. /api/orders no longer creates orders (it answers 410).
 const ONLINE_PAYMENT = {
   enabled: true,
   apiUrl: 'https://pay.glow-home.ir', // payment-server's public https URL, no trailing slash

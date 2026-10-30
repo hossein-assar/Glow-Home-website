@@ -1312,6 +1312,22 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
 }
 .alert-error { background: var(--color-accent-100); color: var(--color-accent-800); border: 1px solid var(--color-accent-200); }
 .alert-info { background: var(--color-sage-100); color: var(--color-sage-700); }
+
+/* Checkout with «کارت به کارت»: no order button, a calm "contact us" box
+   (payByContactHtml() in app.js). Same sage tone as .alert-info. */
+.pay-contact {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--color-sage-100);
+  color: var(--color-sage-700);
+  font-size: 14.5px;
+  line-height: 1.9;
+}
+.pay-contact p { margin-bottom: 12px; }
+.pay-contact-links { display: flex; flex-direction: column; gap: 8px; }
+.pay-contact-links .btn { width: 100%; gap: 8px; }
+.pay-contact-links .btn-ghost { background: var(--color-bg); }
 .alert-whatsapp {
   background: var(--color-blue-100);
   color: var(--color-blue-700);

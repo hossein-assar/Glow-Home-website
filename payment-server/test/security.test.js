@@ -32,13 +32,10 @@ test('migration-lock-order-code.sql revokes from everyone but service_role and f
   assert.match(sql, /'anon', 'authenticated', 'service_role'/);
 });
 
-test('nextval_order_code is only called with the service-role key', () => {
-  // api/orders.js: one Supabase client, built from SUPABASE_SERVICE_ROLE_KEY
+test('nextval_order_code is only called by the payment server, with the service-role key', () => {
+  // api/orders.js no longer takes orders: no Supabase client, no key, no order codes.
   const orders = read('../../api/orders.js');
-  assert.equal([...orders.matchAll(/createClient\(/g)].length, 1);
-  assert.match(orders, /const serviceKey = process\.env\.SUPABASE_SERVICE_ROLE_KEY;/);
-  assert.match(orders, /const sb = createClient\(SUPABASE_URL, serviceKey\);/);
-  assert.match(orders, /sb\.rpc\('nextval_order_code'\)/);
+  assert.doesNotMatch(orders, /createClient|SUPABASE_SERVICE_ROLE_KEY|nextval_order_code|supabase-js/);
 
   // payment-server: one client, from config.supabaseServiceRoleKey = SUPABASE_SERVICE_ROLE_KEY
   const db = read('../src/db.js');
@@ -52,8 +49,8 @@ test('nextval_order_code is only called with the service-role key', () => {
   for (const file of ['../../app.js', '../../admin/admin.js', '../../data.js', '../../supabase-config.js']) {
     assert.doesNotMatch(read(file), /nextval_order_code/, file);
   }
-  // No other server function calls it.
-  for (const f of readdirSync(new URL('../../api/', import.meta.url)).filter((f) => f.endsWith('.js') && f !== 'orders.js')) {
+  // No server function on the site calls it.
+  for (const f of readdirSync(new URL('../../api/', import.meta.url)).filter((f) => f.endsWith('.js'))) {
     assert.doesNotMatch(read('../../api/' + f), /nextval_order_code/, f);
   }
 });

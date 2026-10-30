@@ -15,16 +15,34 @@ decisions from code alone — read this before making structural changes.
   hand in the Supabase SQL Editor, in the order they were created. There is
   no migration tool tracking what's already run — check the live schema via
   the Supabase dashboard if unsure whether one landed.
-- **Order creation**: `/api/orders.js`, a Vercel serverless function using
-  `@supabase/supabase-js` with the **service role** key (`SUPABASE_SERVICE_ROLE_KEY`
-  env var in Vercel, never in code). This is deliberate: the browser only
-  sends *which* products and *how many* — the function re-fetches real
-  prices/stock from the DB itself, so nobody can tamper with pricing from
-  devtools. Never let the browser write directly to `orders`/`order_items`.
+- **Order creation**: only through online payment — the payment server's
+  `POST /api/checkout` (below), with the Supabase **service role** key
+  (`SUPABASE_SERVICE_ROLE_KEY`, in the VPS's `.env`, never in code). The
+  browser only sends *which* products and *how many*; the server re-fetches
+  real prices/stock from the DB itself, so nobody can tamper with pricing
+  from devtools. Never let the browser write directly to
+  `orders`/`order_items`. `/api/orders.js` (Vercel) used to create
+  «کارت به کارت» orders this way; it is **retired** (2026-10) and answers
+  every POST with 410 — see "Card-to-card" below. It keeps only the pricing
+  helpers, as the third hand-copied set the tests compare.
+- **Card-to-card («کارت به کارت»)**: places no order, saves nothing, sends
+  no email, and leaves the cart as it is. Choosing it at checkout replaces
+  the order button with a calm box (`payByContactHtml()` in `app.js`):
+  «برای پرداخت کارت به کارت، لطفاً با ما تماس بگیرید یا پیام بدهید», the
+  phone as a tap-to-call `tel:` link, Instagram and the contact page; on
+  phones the sticky action bar's button becomes «تماس برای پرداخت». The
+  number is `COPY.contactPhone` in `data.js` — the same constant the
+  contact page and footer show, so it changes in one place. The browser
+  never sent a payment method, so `/api/orders` could not refuse only
+  card-to-card orders; it refuses all of them instead.
+- **Online-payment switch**: `ONLINE_PAYMENT.enabled` in `data.js` (on in
+  production). Setting it to `false` and deploying stops all ordering: every
+  payment option then shows the same contact box with «پرداخت آنلاین فعلاً
+  در دسترس نیست…». There is no fallback order path any more.
 - **Payment server (ZarinPal)**: `payment-server/`, a Node server on an
   Iranian VPS (ZarinPal only accepts requests from a registered server IP),
   run by pm2 as `glow-payment` behind nginx at `pay.glow-home.ir`. It
-  re-prices the cart from Supabase like `/api/orders.js`. **It reaches
+  re-prices the cart from Supabase. **It reaches
   Supabase through `https://glow-home.ir/sb`, not `*.supabase.co`**: direct
   calls from the VPS stalled on writes (order number, saving the ZarinPal
   Authority) while reads worked, so checkout hung. `SUPABASE_URL` is set in
@@ -35,7 +53,7 @@ decisions from code alone — read this before making structural changes.
   checklist and timeouts: `payment-server/README.md`.
 - **Checkout field validation**: کد پستی and شماره موبایل are both
   validated and normalized on *both* sides — `app.js` client-side, mirrored
-  by hand in `api/orders.js` server-side (never trusts the client's own
+  by hand in `payment-server/src/pricing.js` server-side (never trusts the client's own
   normalization, same reasoning as the pricing re-fetch above). کد پستی:
   exactly 10 digits; Persian/Arabic-Indic numerals (۰-۹ / ٠-٩) are silently
   converted to Latin before validating and storing
@@ -48,12 +66,8 @@ decisions from code alone — read this before making structural changes.
   or bare shapes). The canonical **stored** format is unchanged,
   `09XXXXXXXXX` (`normalizeIranPhone`), specifically so existing orders,
   the admin panel, and `/track` matching all keep working with no changes
-  on their end. One consequence: `api/orders.js`'s public validation
-  surface narrowed along with it — it no longer accepts the old
-  `0098…`/bare-`98…`/leading-`0` phone shapes directly. That only matters
-  to something calling `/api/orders` outside the browser (curl/devtools);
-  the real checkout flow only ever sends the new `+98` form, so no actual
-  customer is affected. Unlike postcode, phone numbers do **not** get Persian/Arabic digits silently
+  on their end. The server only accepts the `+98` form the checkout sends,
+  not the old `0098…`/bare-`98…`/leading-`0` shapes. Unlike postcode, phone numbers do **not** get Persian/Arabic digits silently
   converted: `containsPersianOrArabicDigits()` rejects them up front with a
   message asking for English digits instead, because the phone input
   doubles as the canonical stored value — see the gotcha below, this
@@ -77,7 +91,7 @@ decisions from code alone — read this before making structural changes.
 - **Shipping method**: determined entirely by شهر, not chosen freely by the
   customer — تهران gets پیک تهران only, anywhere else (non-empty) gets
   تیپاکس only (`shippingMethodForCity()` in `app.js`, mirrored in
-  `api/orders.js`; `normalizePersianText()` handles whitespace/half-space
+  the payment server and `api/orders.js`; `normalizePersianText()` handles whitespace/half-space
   and Arabic-vs-Persian ی/ک variants so close spellings still match). شهر
   itself is a تهران / شهرستان dropdown, not free text — picking شهرستان
   reveals a free-text city-name field, and that typed value is what
@@ -85,7 +99,7 @@ decisions from code alone — read this before making structural changes.
   پست پیشتاز was retired from both `data.js`'s and `api/orders.js`'s
   `SHIPPING` once this rule made it permanently unreachable (no city could
   ever select it). The checkout UI disables (doesn't hide) the ineligible
-  option with a reason, and reacts live to شهر edits. `api/orders.js`
+  option with a reason, and reacts live to شهر edits. The payment server
   derives the shipping method solely from the validated city — it never
   trusts the client's own `shipping_method` choice, same "don't trust the
   client" pattern as pricing/stock. Both پیک تهران and تیپاکس are
@@ -98,7 +112,7 @@ decisions from code alone — read this before making structural changes.
   (checkout's order-summary hint, the cart page's equivalent, and the
   shipping option's own note in `data.js` all now read generically, the
   same as تیپاکس's phrasing always has) — but the real, known fee is still
-  stored server-side: `api/orders.js` writes `method.cost` (not the
+  stored server-side: the payment server writes the method's cost (not the
   charged amount) into `shipping_cost`, so it isn't lost from the database,
   and the admin panel still surfaces it per-order and in the sales-summary
   COD note (see below).
@@ -113,19 +127,18 @@ decisions from code alone — read this before making structural changes.
   This replaced an earlier version of the banner that asked customers to
   screenshot their cart and message a WhatsApp number — that flow and its
   icon/CSS (`whatsappIcon()`, `.whatsapp-number`) are gone entirely now.
-- **Order notifications**: `/api/orders.js` emails the shop on every new
-  order via Resend's API (plain `fetch()`, no SDK), through the shared
-  sender `api/_email.js`. Needs `RESEND_API_KEY` and `ORDER_NOTIFY_EMAIL`
-  set in Vercel's environment variables — never in code. The sender is
-  `EMAIL_FROM` (e.g. `Glow Home <orders@glow-home.ir>`, domain verified in
-  Resend); only when that is unset does it fall back to
+- **Email**: the site sends one email, from the contact form, via
+  Resend's API (plain `fetch()`, no SDK) through the shared sender
+  `api/_email.js`. Needs `RESEND_API_KEY` and `ORDER_NOTIFY_EMAIL` (the
+  recipient) set in Vercel's environment variables — never in code. The
+  sender is `EMAIL_FROM` (e.g. `Glow Home <orders@glow-home.ir>`, domain
+  verified in Resend); only when that is unset does it fall back to
   `onboarding@resend.dev`, which Resend refuses (403) for anyone but the
-  account owner — so it must be set in Production. If the key or recipient is missing, the notification step silently no-ops rather
-  than breaking checkout; a failed send (bad key, Resend outage, etc.) is
-  caught and logged with `console.error` but never surfaces to the customer.
-- **Contact form**: `/api/contact.js` emails the shop through the same
-  Resend call, env vars, sender and recipient (`ORDER_NOTIFY_EMAIL`), subject
-  «پیام جدید از فرم تماس». Unlike the order email, a missing key or failed
+  account owner — so it must be set in Production. There is no new-order
+  email any more: it came from `/api/orders.js`, which no longer takes
+  orders, and the payment server sends none.
+- **Contact form**: `/api/contact.js` emails the shop through that shared
+  sender, subject «پیام جدید از فرم تماس». A missing key or failed
   send returns a generic error to the page (the email is the whole job, so
   it must not pretend to succeed). Origin must be exactly
   `https://glow-home.ir` (www redirects there; Vercel preview URLs are
@@ -141,7 +154,7 @@ decisions from code alone — read this before making structural changes.
   reconstructs the full canonical form client-side (case-insensitive,
   handles a pasted "GH-"/"gh-" prefix, even doubled-up, gracefully).
   Letters are deliberately still accepted there, not just digits: rare as
-  it is, `api/orders.js` has a base-36 fallback order-code path (letters
+  it is, the payment server has a base-36 fallback order-code path (letters
   included) for when its DB sequence RPC fails, and a customer with one of
   those still needs to be able to look it up.
 - **Admin panel**: `/admin/` — plain Supabase-auth login, `is_admin` flag on
@@ -197,9 +210,9 @@ assuming — it's been gotten wrong more than once in this project's history.
 Cart lines are keyed by `slug`, or `slug::h<height>` and/or `slug::c<colorIndex>`
 when the product has variants/colors selected (see `parseCartKey`/`cartKeyFor`
 in app.js). This lets two sizes/colors of the same product sit as distinct,
-correctly-priced cart lines. `/api/orders.js` re-parses this same key format
-server-side to resolve authoritative prices — if you change this format,
-update both sides.
+correctly-priced cart lines. The payment server (and the kept copy in
+`api/orders.js`) re-parses this same key format server-side to resolve
+authoritative prices — if you change this format, update all of them.
 
 A product whose `variants` entries carry a `shades` map (گیسو: plain /
 embroidered, دفرمه: plain / macrame — see `supabase/migration-*-shades.sql`)
@@ -208,12 +221,12 @@ is also priced by shade type:
 key `gisoo::h140::splain` / `::sembroidered`. A size accepts only the keys in
 its own `shades` map; labels are `SHADE_TYPES`, copied in app.js,
 admin/admin.js, api/orders.js and payment-server. Such a product is priced
-strictly on both servers — a key without a stored height + shade (e.g. an
+strictly by the payment server — a key without a stored height + shade (e.g. an
 old `gisoo::h100`) is rejected, not guessed; the storefront drops those
 stale lines from the cart once the live catalog loads.
 
 Sizes are strict the same way for every product: a key naming a height must
-name one of `withBaseSize()`'s sizes, or both servers reject it (it used to
+name one of `withBaseSize()`'s sizes, or the payment server rejects it (it used to
 be priced at the base price, whatever the height). A key with no height is
 the base size. The storefront drops any cart line it can't price —
 `cartLineData()` returns null — when the catalog loads.
@@ -280,13 +293,9 @@ the base size. The storefront drops any cart line it can't price —
 
 ## Not yet built
 
-- **Payment gateway** — no ZarinPal/Snapp Pay *API* integration. Checkout
-  itself still creates a real, correctly-priced order but collects no money
-  automatically. Snapp Pay installments are no longer purely aspirational
-  copy, though: checkout's banner (see above) now walks the customer
-  through a real, if manual/human-in-the-loop, purchase flow (direct
+- **Snapp Pay API** — no Snapp Pay integration (ZarinPal online payment is
+  built: see "Payment server"). Checkout's Snapp Pay banner (see above)
+  walks the customer through a manual, human-in-the-loop flow (direct
   message to the shop, admin sends a payment link outside this codebase).
-  There's still no automated gateway callback/webhook here — "not built"
-  refers to that integration, not to the installment option existing at all.
 - **Customer accounts** — guest checkout only, no login, no order history
   for customers.

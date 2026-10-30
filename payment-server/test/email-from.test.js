@@ -1,4 +1,5 @@
-// Email sender (api/_email.js, used by api/contact.js and api/orders.js):
+// Email sender (api/_email.js, used by api/contact.js — the only email the
+// site sends; api/orders.js no longer takes orders, so it sends none):
 // every email goes out "from" EMAIL_FROM when it is set — Resend refuses
 // onboarding@resend.dev (403, testing-domain restriction) for real mail —
 // and to ORDER_NOTIFY_EMAIL. fetch is stubbed — no email is really sent.
@@ -10,25 +11,6 @@ import { readFileSync, readdirSync } from 'node:fs';
 const require = createRequire(import.meta.url);
 const email = require('../../api/_email.js');
 const contact = require('../../api/contact.js');
-// api/orders.js needs @supabase/supabase-js, which is not installed at the
-// site root here: run its real email function, pulled out of the source text,
-// with the real shared sender.
-const ordersSrc = readFileSync(new URL('../../api/orders.js', import.meta.url), 'utf8');
-const fnSrc = (re) => {
-  const m = ordersSrc.match(re);
-  assert.ok(m, 'not found in api/orders.js: ' + re);
-  return m[0];
-};
-const orders = new Function(
-  'emailConfigured', 'sendShopEmail',
-  [
-    fnSrc(/function escapeHtml\([\s\S]*?\n}\n/),
-    fnSrc(/function toman\([\s\S]*?\n}\n/),
-    fnSrc(/async function sendOrderNotificationEmail\([\s\S]*?\n}\n/),
-    'return { sendOrderNotificationEmail };',
-  ].join('\n')
-)(email.emailConfigured, email.sendShopEmail);
-
 const OWN = 'Glow Home <orders@glow-home.ir>';
 const TESTING = 'onboarding@resend.dev';
 
@@ -86,25 +68,9 @@ test('contact form email: from EMAIL_FROM, to ORDER_NOTIFY_EMAIL', async () => {
   assert.deepEqual(sent[0].body.to, ['shop@example.com']);
 });
 
-test('new-order email: from EMAIL_FROM, to ORDER_NOTIFY_EMAIL', async () => {
-  const order = { code: 'GH-1001', customer_name: 'سارا', phone: '09121234567', city: 'تهران', address: 'خیابان ۱', total: 100000 };
-  await orders.sendOrderNotificationEmail(order, [{ name_fa: 'لاله', qty: 1, unit_price: 100000 }]);
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].url, 'https://api.resend.com/emails');
-  assert.equal(sent[0].body.from, OWN);
-  assert.ok(!sent[0].body.from.includes(TESTING));
-  assert.deepEqual(sent[0].body.to, ['shop@example.com']);
-  assert.equal(sent[0].body.subject, 'سفارش جدید — GH-1001');
-});
-
-test('new-order email is skipped quietly when the key or recipient is missing', async () => {
-  for (const name of ['RESEND_API_KEY', 'ORDER_NOTIFY_EMAIL']) {
-    const saved = process.env[name];
-    delete process.env[name];
-    await orders.sendOrderNotificationEmail({ code: 'GH-1', total: 0 }, []);
-    process.env[name] = saved;
-  }
-  assert.equal(sent.length, 0);
+test('api/orders.js sends no email: it no longer takes orders', () => {
+  const src = readFileSync(new URL('../../api/orders.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /_email|sendShopEmail|RESEND_API_KEY|ORDER_NOTIFY_EMAIL/);
 });
 
 test('no sender hard-codes onboarding@resend.dev: only the fallback in api/_email.js names it', () => {

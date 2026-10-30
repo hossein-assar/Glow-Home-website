@@ -1,20 +1,22 @@
-// POST /api/orders
+// POST /api/orders — retired: refuses every order.
 //
-// Creates a real order. Runs with the Supabase service-role key (set as the
-// SUPABASE_SERVICE_ROLE_KEY environment variable in Vercel — never in this
-// file or in any file that ships to the browser), which is what lets it
-// write to the orders/order_items tables even though the RLS policies on
-// those tables don't grant the public a write path directly.
+// This endpoint used to create «کارت به کارت» orders (and, with
+// ONLINE_PAYMENT switched off in data.js, every order) straight into the
+// database. Card-to-card no longer places an order at all: checkout asks the
+// customer to contact the shop instead (see payByContactHtml() in app.js).
+// The only way to order on the site is online payment, which goes to the
+// payment server (payment-server/, POST /api/checkout) and never here.
 //
-// Security note: the client only ever sends *which* products and *how many*
-// (cart keys + quantities) — every price, discount, and shipping cost is
-// looked up fresh from the database and recomputed here. A tampered client
-// request cannot change what anyone actually gets charged.
+// The browser never sent a payment method, so this endpoint could not tell a
+// card-to-card order from any other: it refuses them all, before reading the
+// body, touching the database or sending any email.
+//
+// The pricing helpers below are kept as the third hand-copied set of the
+// shop's rules (with data.js and payment-server/src/pricing.js) — `npm test`
+// in payment-server/ checks the copies still match.
 
-const { createClient } = require('@supabase/supabase-js');
-const { emailConfigured, sendShopEmail } = require('./_email');
-
-const SUPABASE_URL = 'https://sgfoesnpodvwyzlxfhtq.supabase.co';
+const RETIRED_ERROR =
+  'ثبت سفارش از این مسیر انجام نمی‌شود. برای خرید از «پرداخت آنلاین» در صفحه‌ی تکمیل خرید استفاده کنید؛ برای پرداخت کارت به کارت با ما تماس بگیرید.';
 
 // Mirrors data.js — kept in sync by hand since this is server-side business
 // logic, not sensitive data, and duplicating it here avoids needing a build
@@ -37,57 +39,6 @@ const FREE_SHIP_OVER = 3000000;
 // payment-server/src/pricing.js (online payment) and data.js. Change all
 // three together. `npm test` in payment-server/ fails if they differ.
 const DISCOUNT_CODES = {}; // none for now — see data.js
-
-const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
-const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩'; // Arabic-Indic — some keyboards/OSes produce these instead of ۰-۹
-
-// Mirrors the same-named helpers in app.js — see there for the reasoning;
-// duplicated here so the server never has to trust the client's own
-// normalization of what it typed.
-function toLatinDigits(s) {
-  return String(s ?? '').replace(/[۰-۹٠-٩]/g, (d) => {
-    const fa = FA_DIGITS.indexOf(d);
-    if (fa !== -1) return String(fa);
-    return String(AR_DIGITS.indexOf(d));
-  });
-}
-
-function isValidPostcode(raw) {
-  return /^[0-9]{10}$/.test(toLatinDigits(raw).trim());
-}
-
-function normalizePostcode(raw) {
-  return toLatinDigits(raw).trim();
-}
-
-// Phone numbers, unlike postcode, are NOT auto-converted from Persian/
-// Arabic-Indic digits — the caller must reject those first (see
-// containsPersianOrArabicDigits below) rather than have this silently
-// convert them, so this expects English digits only.
-function containsPersianOrArabicDigits(raw) {
-  return /[۰-۹٠-٩]/.test(String(raw ?? ''));
-}
-
-// The checkout phone field shows a fixed "+98" prefix in the UI now (the
-// customer only types the bare 10-digit subscriber part), and the client
-// sends the reconstructed "+98"+digits form — so this no longer needs to
-// guess between +98/0098/98/0-prefixed or bare input. It still tolerates
-// an optional "+98" so it validates the same whether given the full
-// reconstructed value or the bare digits directly.
-function iranPhoneSubscriberPart(raw) {
-  let v = String(raw ?? '').replace(/\s+/g, '');
-  if (v.startsWith('+98')) v = v.slice(3);
-  return /^9[0-9]{9}$/.test(v) ? v : null;
-}
-
-function isValidIranPhone(raw) {
-  return iranPhoneSubscriberPart(raw) !== null;
-}
-
-function normalizeIranPhone(raw) {
-  const sub = iranPhoneSubscriberPart(raw);
-  return sub ? '0' + sub : String(raw ?? '').trim();
-}
 
 function normalizePersianText(s) {
   return String(s ?? '')
@@ -131,8 +82,7 @@ function cityFees(rawCity) {
 }
 // ---- end of city fees ----------------------------------------------------------
 
-// The only source of truth for which method an order gets — the client's
-// own shipping_method choice is never trusted (see the call site below).
+// Which courier a city gets: پیک in Tehran, تیپاکس everywhere else.
 function shippingMethodForCity(rawCity) {
   return isTehranCity(rawCity) ? 'peyk' : 'tipax';
 }
@@ -205,249 +155,21 @@ function sizeLine(p, height) {
   return { price: Number(v.price), label: `${p.name_fa} (${v.height} سانتی‌متر)` };
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[c]));
-}
-
-function toman(n) {
-  return Number(n).toLocaleString('en-US') + ' تومان';
-}
-
-// Best-effort admin notification — never allowed to affect the checkout
-// response either way. Sent through ./_email.js (Resend over a plain
-// fetch(), sender from EMAIL_FROM, to ORDER_NOTIFY_EMAIL); skipped quietly
-// when RESEND_API_KEY / ORDER_NOTIFY_EMAIL are not set.
-async function sendOrderNotificationEmail(order, orderItems) {
-  if (!emailConfigured()) return;
-
-  const itemsHtml = orderItems
-    .map(
-      (it) =>
-        `<li>${escapeHtml(it.name_fa)} — تعداد: ${it.qty} — ${toman(it.unit_price * it.qty)}</li>`
-    )
-    .join('');
-
-  const html = `
-    <div dir="rtl" style="font-family: sans-serif;">
-      <h2>سفارش جدید — ${escapeHtml(order.code)}</h2>
-      <p><strong>مشتری:</strong> ${escapeHtml(order.customer_name)}</p>
-      <p><strong>موبایل:</strong> ${escapeHtml(order.phone)}</p>
-      <p><strong>شهر / نشانی:</strong> ${escapeHtml(order.city)} — ${escapeHtml(order.address)}</p>
-      <h3>اقلام سفارش</h3>
-      <ul>${itemsHtml}</ul>
-      <p><strong>جمع کل:</strong> ${toman(order.total)}</p>
-    </div>
-  `;
-
-  await sendShopEmail({ subject: `سفارش جدید — ${order.code}`, html });
-}
-
-module.exports = async (req, res) => {
+module.exports = (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ ok: false, error: 'Method not allowed' });
     return;
   }
-
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceKey) {
-    res.status(500).json({ ok: false, error: 'سرور آماده نیست — کلید سرویس تنظیم نشده.' });
-    return;
-  }
-
-  let body = req.body;
-  if (typeof body === 'string') {
-    try {
-      body = JSON.parse(body);
-    } catch {
-      res.status(400).json({ ok: false, error: 'درخواست نامعتبر است.' });
-      return;
-    }
-  }
-
-  // shipping_method is intentionally NOT read from the body — see the
-  // "Shipping" section below, which derives it from city instead.
-  const { customer, note, items, discount_code } = body || {};
-
-  // ---- Validate the shape of what came in -----------------------------
-  if (!customer || typeof customer !== 'object') {
-    res.status(400).json({ ok: false, error: 'اطلاعات مشتری ناقص است.' });
-    return;
-  }
-  const name = String(customer.name || '').trim();
-  const phoneRaw = String(customer.phone || '').trim();
-  const city = String(customer.city || '').trim();
-  const address = String(customer.address || '').trim();
-  const postcodeRaw = String(customer.postcode || '').trim();
-
-  if (!name) return res.status(400).json({ ok: false, error: 'نام و نام خانوادگی را وارد کنید.' });
-  if (containsPersianOrArabicDigits(phoneRaw))
-    return res.status(400).json({ ok: false, error: 'لطفاً شماره موبایل را با اعداد انگلیسی وارد کنید.' });
-  if (!isValidIranPhone(phoneRaw))
-    return res.status(400).json({ ok: false, error: 'شماره موبایل معتبر نیست.' });
-  if (!city) return res.status(400).json({ ok: false, error: 'شهر را وارد کنید.' });
-  if (address.length < 10) return res.status(400).json({ ok: false, error: 'نشانی را کامل‌تر بنویسید.' });
-  // کد پستی stays optional (nullable column) — but if one was sent, it must
-  // actually be a valid 10-digit code, same rule the browser enforces.
-  if (postcodeRaw && !isValidPostcode(postcodeRaw))
-    return res.status(400).json({ ok: false, error: 'کد پستی باید دقیقاً ۱۰ رقم باشد.' });
-  if (!Array.isArray(items) || !items.length)
-    return res.status(400).json({ ok: false, error: 'سبد خرید خالی است.' });
-
-  // Canonical stored formats — same numbers regardless of how the client
-  // typed or normalized them client-side.
-  const phone = normalizeIranPhone(phoneRaw);
-  const postcode = postcodeRaw ? normalizePostcode(postcodeRaw) : '';
-
-  const sb = createClient(SUPABASE_URL, serviceKey);
-
-  // ---- Recompute every line from the database, ignoring any price the
-  //      client might have sent ------------------------------------------
-  const slugs = [...new Set(items.map((it) => parseCartKey(it.cartKey).id))];
-  const { data: products, error: fetchErr } = await sb
-    .from('products')
-    .select('id, slug, name_fa, price, height_cm, variants, colors, in_stock')
-    .in('slug', slugs);
-
-  if (fetchErr) {
-    res.status(500).json({ ok: false, error: 'خطا در خواندن اطلاعات محصولات.' });
-    return;
-  }
-
-  const bySlug = Object.fromEntries(products.map((p) => [p.slug, p]));
-  const orderItems = [];
-  let subtotal = 0;
-
-  for (const it of items) {
-    const qty = Math.max(1, Math.floor(Number(it.qty) || 1));
-    const { id: slug, height, colorIndex, shade } = parseCartKey(it.cartKey);
-    const p = bySlug[slug];
-    if (!p) return res.status(400).json({ ok: false, error: `محصول «${slug}» پیدا نشد.` });
-    if (!p.in_stock) return res.status(400).json({ ok: false, error: `«${p.name_fa}» فعلاً موجود نیست.` });
-
-    let price = p.price;
-    let label = p.name_fa;
-    if (hasShadeTypes(p)) {
-      const line = shadeLine(p, height, shade);
-      if (line.error) return res.status(400).json({ ok: false, error: line.error });
-      ({ price, label } = line);
-    } else {
-      const line = sizeLine(p, height);
-      if (line.error) return res.status(400).json({ ok: false, error: line.error });
-      ({ price, label } = line);
-    }
-    if (colorIndex != null && Array.isArray(p.colors) && p.colors[colorIndex] != null) {
-      label += ` — ${p.colors[colorIndex]}`;
-    }
-
-    const line = price * qty;
-    subtotal += line;
-    orderItems.push({ product_id: p.id, name_fa: label, qty, unit_price: price });
-  }
-
-  // ---- Discount ----------------------------------------------------------
-  // Own keys only, so "constructor" / "__proto__" can't count as a code.
-  const code =
-    typeof discount_code === 'string' && Object.hasOwn(DISCOUNT_CODES, discount_code) ? discount_code : null;
-  const rate = code ? DISCOUNT_CODES[code] : 0;
-  const discount = Math.round(subtotal * rate);
-  const base = subtotal - discount;
-
-  // ---- Shipping --------------------------------------------------------
-  // Derived from شهر, not taken from the client's shipping_method — same
-  // reasoning as prices/stock above: city is the one thing that actually
-  // determines which courier can fulfill the order, so it's not the
-  // client's choice to make. An old/stale client sending "post" (retired)
-  // or any other value has no effect either way.
-  const resolvedShippingMethod = shippingMethodForCity(city);
-  const method = SHIPPING[resolvedShippingMethod];
-  const freeShip = !method.payAtDoor && base >= FREE_SHIP_OVER;
-  const shipCost = method.payAtDoor || freeShip ? 0 : method.cost;
-  // City fees (packaging outside Tehran) from the city alone — nothing the
-  // client sends about fees is read. Each is stored as its own order line.
-  const fees = cityFees(city);
-  for (const f of fees) orderItems.push({ product_id: null, name_fa: f.label, qty: 1, unit_price: f.amount });
-  const total = base + shipCost + fees.reduce((sum, f) => sum + f.amount, 0);
-
-  // ---- Order code (clean sequential number, guaranteed unique) -----------
-  const { data: seqData, error: seqErr } = await sb.rpc('nextval_order_code');
-  let orderCode;
-  if (seqErr || seqData == null) {
-    // Fallback: nextval() via a raw query if the RPC wrapper isn't set up —
-    // still guaranteed unique, just less clean-looking if this path is hit.
-    orderCode = 'GH-' + Date.now().toString(36).toUpperCase();
-  } else {
-    orderCode = 'GH-' + seqData;
-  }
-
-  // ---- Write the order -----------------------------------------------------
-  const { data: order, error: orderErr } = await sb
-    .from('orders')
-    .insert({
-      code: orderCode,
-      customer_name: name,
-      phone,
-      city,
-      address,
-      postcode: postcode || null,
-      note: note ? String(note).trim() || null : null,
-      shipping_method: resolvedShippingMethod,
-      // The nominal shipping fee, NOT shipCost — shipCost is 0 for any
-      // payAtDoor method by design (it's excluded from the site's charged
-      // total), but that would also erase the actual known fee amount
-      // (e.g. پیک's ۹۰,۰۰۰ تومان) from the stored order. Keeping the real
-      // fee here means the admin panel/DB still records what the courier
-      // is expected to collect in cash, even though it's not part of
-      // `total`. تیپاکس is unaffected — its own cost is already 0 (its fee
-      // isn't a known fixed amount), so this stores the same 0 either way.
-      shipping_cost: method.cost,
-      discount_code: code,
-      subtotal,
-      total,
-      status: 'pending',
-    })
-    .select()
-    .single();
-
-  if (orderErr) {
-    res.status(500).json({ ok: false, error: 'ثبت سفارش با خطا مواجه شد. دوباره تلاش کنید.' });
-    return;
-  }
-
-  const rowsWithOrderId = orderItems.map((it) => ({ ...it, order_id: order.id }));
-  const { error: itemsErr } = await sb.from('order_items').insert(rowsWithOrderId);
-
-  if (itemsErr) {
-    // Order shell exists but items failed — clean up rather than leave a
-    // broken/empty order behind.
-    await sb.from('orders').delete().eq('id', order.id);
-    res.status(500).json({ ok: false, error: 'ثبت اقلام سفارش با خطا مواجه شد. دوباره تلاش کنید.' });
-    return;
-  }
-
-  // ---- Notify the shop by email (best-effort, must never break checkout) --
-  try {
-    await sendOrderNotificationEmail(order, orderItems);
-  } catch (notifyErr) {
-    console.error('Order notification email failed:', notifyErr);
-  }
-
-  res.status(200).json({
-    ok: true,
-    code: order.code,
-    total,
-    subtotal,
-    discount,
-    shipLabel: method.payAtDoor ? 'پس‌کرایه' : freeShip ? 'رایگان' : String(shipCost),
-    items: orderItems.map((it) => ({ fa: it.name_fa, qty: it.qty, line: it.unit_price * it.qty })),
-  });
+  res.status(410).json({ ok: false, error: RETIRED_ERROR });
 };
 
-// Pure helpers, exposed only so payment-server's tests can check this copy.
+// Pricing helpers, exposed only so payment-server's tests can check this copy.
 module.exports.parseCartKey = parseCartKey;
 module.exports.shadeLine = shadeLine;
 module.exports.hasShadeTypes = hasShadeTypes;
 module.exports.SHADE_TYPES = SHADE_TYPES;
 module.exports.withBaseSize = withBaseSize;
 module.exports.sizeLine = sizeLine;
+module.exports.cityFees = cityFees;
+module.exports.shippingMethodForCity = shippingMethodForCity;
+module.exports.RETIRED_ERROR = RETIRED_ERROR;

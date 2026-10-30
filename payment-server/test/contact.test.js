@@ -129,12 +129,10 @@ test('valid POST sends one email to ORDER_NOTIFY_EMAIL via Resend', async () => 
   assert.ok(sent[0].body.html.includes('09121234567'));
 });
 
-test('sends through the same shared sender as api/orders.js', () => {
-  for (const file of ['contact.js', 'orders.js']) {
-    const src = readFileSync(new URL('../../api/' + file, import.meta.url), 'utf8');
-    assert.match(src, /require\('\.\/_email'\)/, file);
-    assert.match(src, /sendShopEmail\(/, file);
-  }
+test('sends through the shared sender in api/_email.js', () => {
+  const src = readFileSync(new URL('../../api/contact.js', import.meta.url), 'utf8');
+  assert.match(src, /require\('\.\/_email'\)/);
+  assert.match(src, /sendShopEmail\(/);
 });
 
 test('strict CORS: other or missing origins are refused, nothing sent', async () => {

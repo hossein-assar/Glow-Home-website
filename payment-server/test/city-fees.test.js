@@ -13,10 +13,6 @@ import {
 } from '../src/pricing.js';
 import { tomanToGatewayAmount } from '../src/config.js';
 import { createApp } from '../src/app.js';
-import { createRequire } from 'node:module';
-
-// api/orders.js sends its email through the shared api/_email.js.
-const requireReal = createRequire(import.meta.url);
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const appJs = read('../../app.js');
@@ -85,13 +81,10 @@ test('outside Tehran (Karaj, Isfahan, Arabic ك/ي spellings, …): the packagin
   assert.equal(isTehranCity('تهرانی‌ها'), false);
 });
 
-test('empty city: no fee from the rule — and both servers refuse the order («شهر را وارد کنید.»)', async () => {
+test('empty city: no fee from the rule — and the payment server refuses the order («شهر را وارد کنید.»)', () => {
   for (const city of ['', '   ', '‌', null, undefined]) assert.deepEqual(cityFees(city), [], String(city));
   const body = { customer: { name: 'سارا', phone: '+989121234567', city: '  ', address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' }, items: CART };
   assert.equal(validateCheckoutBody(body).error, 'شهر را وارد کنید.');
-  const r = await postOrder({ city: '  ' });
-  assert.equal(r.status, 400);
-  assert.equal(r.json.error, 'شهر را وارد کنید.');
 });
 
 test('the Tipax extra, once set above 0, adds its own line outside Tehran only', () => {
@@ -142,67 +135,6 @@ test('a client-sent fee is ignored: it is not even read from the body', () => {
     assert.ok(!('packaging_fee' in v.value) && !('fees' in v.value));
     assert.equal(priceCart({ items: v.value.items, products: [gisoo], discountCode: null, city: v.value.city }).total, expected);
   }
-});
-
-// ---- api/orders.js, end to end with a fake Supabase ------------------------------------------
-
-async function postOrder({ city, extra = {} }) {
-  const inserted = {};
-  const sb = {
-    from(table) {
-      return {
-        select: () => ({ in: async () => ({ data: [gisoo], error: null }) }),
-        insert(row) {
-          inserted[table] = row;
-          return table === 'orders'
-            ? { select: () => ({ single: async () => ({ data: { id: 1, ...row }, error: null }) }) }
-            : Promise.resolve({ error: null });
-        },
-      };
-    },
-    rpc: async () => ({ data: 1020, error: null }),
-  };
-  const mod = { exports: {} };
-  const stubRequire = (id) => {
-    if (id === '@supabase/supabase-js') return { createClient: () => sb };
-    if (id === './_email') return requireReal('../../api/_email.js');
-    throw new Error('unexpected require ' + id);
-  };
-  new Function('require', 'module', 'exports', ordersJs)(stubRequire, mod, mod.exports);
-  const saved = { ...process.env };
-  process.env.SUPABASE_SERVICE_ROLE_KEY = 'test';
-  delete process.env.RESEND_API_KEY;
-  let status, json;
-  const res = { status(s) { status = s; return this; }, json(j) { json = j; return this; } };
-  try {
-    await mod.exports({
-      method: 'POST',
-      body: {
-        customer: { name: 'سارا', phone: '+989121234567', city, address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' },
-        items: CART,
-        ...extra,
-      },
-    }, res);
-  } finally {
-    process.env = saved;
-  }
-  return { status, json, order: inserted.orders, items: inserted.order_items };
-}
-
-test('api/orders.js (card-to-card): the same fee, total and order line as the payment server', async () => {
-  for (const city of [...TEHRAN.slice(0, 6), ...OUTSIDE.slice(0, 5)]) {
-    const r = await postOrder({ city, extra: { packaging_fee: 0, fees: [{ label: 'x', amount: 1 }], total: 1 } });
-    const p = priceCart({ items: CART, products: [gisoo], discountCode: null, city });
-    assert.equal(r.status, 200, city);
-    assert.equal(r.order.total, p.total, city);
-    assert.equal(r.json.total, p.total, city);
-    assert.equal(r.order.subtotal, p.subtotal, city);
-    assert.deepEqual(r.items.map(({ order_id, ...it }) => it), p.orderItems.map((it) => ({ ...it, product_id: it.product_id === 'g1' ? gisoo.id : it.product_id })), city);
-  }
-  const karaj = await postOrder({ city: 'کرج' });
-  assert.deepEqual(karaj.items.at(-1), { ...FEE_LINE, order_id: 1 });
-  // the confirmation screen shows the line too
-  assert.deepEqual(karaj.json.items.at(-1), { fa: 'هزینه بسته‌بندی', qty: 1, line: 250000 });
 });
 
 // ---- payment-server route: the amount ZarinPal is asked for ------------------------------------

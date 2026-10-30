@@ -4,8 +4,9 @@
 // one size and showed no size picker. Now:
 //   - admin «ویرایش کامل» shows the base size as the first, read-only row and
 //     saves the complete list (admin/admin.js);
-//   - the storefront and both servers treat height_cm + products.price as a
-//     size when no variant has that height (withBaseSize), and price strictly:
+//   - the storefront and the payment server treat height_cm + products.price
+//     as a size when no variant has that height (withBaseSize; api/orders.js
+//     keeps the same copy, but no longer prices orders), and price strictly:
 //     an unknown height is rejected, a client price is never read;
 //   - shade-type products (گیسو, دفرمه, نیلا) are unchanged.
 import { test } from 'node:test';
@@ -14,10 +15,6 @@ import { readFileSync } from 'node:fs';
 
 import { withBaseSize, sizeLine, priceCart, validateCheckoutBody } from '../src/pricing.js';
 import { tomanToGatewayAmount } from '../src/config.js';
-import { createRequire } from 'node:module';
-
-// api/orders.js sends its email through the shared api/_email.js.
-const requireReal = createRequire(import.meta.url);
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const appJs = read('../../app.js');
@@ -89,55 +86,6 @@ test('withBaseSize leaves shade-type products exactly as stored', () => {
 
 // ---- both servers ------------------------------------------------------------------
 
-/** api/orders.js run end to end against a fake Supabase client. */
-async function postOrder(items, products = [mahtab]) {
-  const inserted = {};
-  const selected = [];
-  const sb = {
-    from(table) {
-      return {
-        select: (cols) => (selected.push(cols), { in: async () => ({ data: products, error: null }) }),
-        insert(row) {
-          inserted[table] = row;
-          return table === 'orders'
-            ? { select: () => ({ single: async () => ({ data: { id: 1, ...row }, error: null }) }) }
-            : Promise.resolve({ error: null });
-        },
-      };
-    },
-    rpc: async () => ({ data: 1000, error: null }),
-  };
-  const mod = { exports: {} };
-  const stubRequire = (id) => {
-    if (id === '@supabase/supabase-js') return { createClient: () => sb };
-    if (id === './_email') return requireReal('../../api/_email.js');
-    throw new Error('unexpected require ' + id);
-  };
-  new Function('require', 'module', 'exports', ordersJs)(stubRequire, mod, mod.exports);
-
-  const saved = { ...process.env };
-  process.env.SUPABASE_SERVICE_ROLE_KEY = 'test';
-  delete process.env.RESEND_API_KEY;
-  let status, json;
-  const res = { status(s) { status = s; return this; }, json(j) { json = j; return this; } };
-  try {
-    await mod.exports(
-      {
-        method: 'POST',
-        body: {
-          customer: { name: 'سارا', phone: '+989121234567', city: 'تهران', address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' },
-          items,
-          total: 1,
-        },
-      },
-      res
-    );
-  } finally {
-    process.env = saved;
-  }
-  return { status, json, items: inserted.order_items, selected };
-}
-
 const customer = { name: 'سارا', phone: '+989121234567', city: 'تهران', address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' };
 /** payment-server: the same validate + price pair its /api/checkout runs. */
 function payServer(items, products = [mahtab]) {
@@ -148,73 +96,56 @@ function payServer(items, products = [mahtab]) {
 
 for (const [height, toman] of [[40, 3500000], [50, 4000000]]) {
   const key = `shade-embroidered-cylinder::h${height}`;
-  test(`${key}: ${toman} Toman in both servers, labelled with its size`, async () => {
+  test(`${key}: ${toman} Toman in the payment server, labelled with its size`, () => {
     const label = `شید گلدوزی مهتاب (${height} سانتی‌متر)`;
     const r = payServer([{ cartKey: key, qty: 2 }]);
     assert.equal(r.error, undefined);
     assert.deepEqual(r.orderItems, [{ product_id: 'm1', name_fa: label, qty: 2, unit_price: toman }]);
     assert.equal(r.total, toman * 2);
     assert.equal(tomanToGatewayAmount(r.total), toman * 2 * 10);
-
-    const o = await postOrder([{ cartKey: key, qty: 2 }]);
-    assert.equal(o.status, 200, JSON.stringify(o.json));
-    assert.equal(o.json.total, toman * 2);
-    assert.deepEqual(o.items.map(({ name_fa, qty, unit_price }) => ({ name_fa, qty, unit_price })), [{ name_fa: label, qty: 2, unit_price: toman }]);
   });
 }
 
-test('both sizes of مهتاب in one cart are two lines at their own prices', async () => {
+test('both sizes of مهتاب in one cart are two lines at their own prices', () => {
   const items = [{ cartKey: 'shade-embroidered-cylinder::h40', qty: 1 }, { cartKey: 'shade-embroidered-cylinder::h50', qty: 1 }];
-  assert.equal(payServer(items).total, 7500000);
-  const o = await postOrder(items);
-  assert.equal(o.json.total, 7500000);
-  assert.deepEqual(o.items.map((i) => i.unit_price), [3500000, 4000000]);
+  const r = payServer(items);
+  assert.equal(r.total, 7500000);
+  assert.deepEqual(r.orderItems.map((i) => i.unit_price), [3500000, 4000000]);
 });
 
-test('a tampered client price is ignored in both servers: the price comes from the DB', async () => {
+test('a tampered client price is ignored: the price comes from the DB', () => {
   const items = [{ cartKey: 'shade-embroidered-cylinder::h50', qty: 1, price: 1000, unit_price: 1000 }];
   const v = validateCheckoutBody({ customer, items, total: 1000 });
   assert.deepEqual(v.value.items, [{ cartKey: 'shade-embroidered-cylinder::h50', qty: 1 }]);
-  assert.equal(payServer(items).total, 4000000);
-  const o = await postOrder(items);
-  assert.equal(o.json.total, 4000000);
-  assert.equal(o.items[0].unit_price, 4000000);
+  const r = payServer(items);
+  assert.equal(r.total, 4000000);
+  assert.equal(r.orderItems[0].unit_price, 4000000);
 });
 
-test('unknown heights are rejected in both servers, never priced at the base price', async () => {
+test('unknown heights are rejected, never priced at the base price', () => {
   const error = 'اندازه‌ی «شید گلدوزی مهتاب» در سبد شما دیگر معتبر نیست. لطفاً آن را از سبد حذف کنید و دوباره انتخاب کنید.';
   for (const key of ['shade-embroidered-cylinder::h60', 'shade-embroidered-cylinder::h0', 'shade-embroidered-cylinder::hx', 'shade-embroidered-cylinder::h']) {
     assert.equal(payServer([{ cartKey: key, qty: 1 }]).error, error, key);
-    const o = await postOrder([{ cartKey: key, qty: 1 }]);
-    assert.equal(o.status, 400, key);
-    assert.equal(o.json.error, error, key);
-    assert.equal(o.items, undefined, key); // no order written
   }
   // A height on a product with no sizes is not a size either.
   assert.match(payServer([{ cartKey: 'lale::h40', qty: 1 }], [lale]).error, /دیگر معتبر نیست/);
-  assert.equal((await postOrder([{ cartKey: 'lale::h40', qty: 1 }], [lale])).status, 400);
 });
 
-test('a key with no height is the base size, as before', async () => {
+test('a key with no height is the base size, as before', () => {
   assert.deepEqual(sizeLine(mahtab, null), { price: 3500000, label: 'شید گلدوزی مهتاب' });
   assert.equal(payServer([{ cartKey: 'lale', qty: 1 }], [lale]).total, 6500000);
-  assert.equal((await postOrder([{ cartKey: 'lale', qty: 1 }], [lale])).json.total, 6500000);
 });
 
-test('both servers read height_cm with the product', async () => {
+test('the payment server reads height_cm with the product', () => {
   assert.match(dbJs, /\.select\('id, slug, name_fa, price, height_cm, variants, colors, in_stock'\)/);
-  const o = await postOrder([{ cartKey: 'shade-embroidered-cylinder::h40', qty: 1 }]);
-  assert.deepEqual(o.selected, ['id, slug, name_fa, price, height_cm, variants, colors, in_stock']);
 });
 
-test('shade-type products are unchanged: strict shade keys, no base size added', async () => {
+test('shade-type products are unchanged: strict shade keys, no base size added', () => {
   for (const [key, toman] of [['nila::h40::sembroidered', 8900000], ['gisoo::h120::splain', 9980000]]) {
     assert.equal(payServer([{ cartKey: key, qty: 1 }], [nila, gisoo]).total, toman, key);
-    assert.equal((await postOrder([{ cartKey: key, qty: 1 }], [nila, gisoo])).json.total, toman, key);
   }
   for (const key of ['nila::h40', 'gisoo::h100', 'gisoo::h80::splain']) {
     assert.match(payServer([{ cartKey: key, qty: 1 }], [nila, gisoo]).error, /نوع شید/, key);
-    assert.equal((await postOrder([{ cartKey: key, qty: 1 }], [nila, gisoo])).status, 400, key);
   }
 });
 

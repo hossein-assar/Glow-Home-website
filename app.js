@@ -367,7 +367,6 @@ const state = {
   // cart, network/server errors).
   formErrors: { name: '', phone: '', city: '', address: '', postcode: '' },
   error: '',
-  order: null,
   faqOpen: 0,
   catalog: 'loading', // 'loading' | 'ready' | 'error' — see loadProductsFromSupabase()
   snappPayOpen: false, // checkout's اسنپ‌پی banner accordion — not persisted, resets each page load
@@ -386,7 +385,7 @@ const state = {
   selectedHeight: null, // chosen size on a product page with variants
   selectedColorIndex: 0, // chosen color on a product page with colors
   selectedShade: 'plain', // chosen shade type on a product page with shade types (گیسو, دفرمه)
-  placingOrder: false, // true while /api/orders is in flight
+  placingOrder: false, // true while the payment server's /api/checkout is in flight
 };
 
 /* ---- Cart maths --------------------------------------------------------- */
@@ -664,7 +663,6 @@ const ROUTES = {
   shop: ['shop', null],
   cart: ['cart', null],
   checkout: ['checkout', null],
-  done: ['done', null],
   about: ['about', null],
   contact: ['contact', null],
   faq: ['faq', null],
@@ -729,12 +727,6 @@ function onRouteChange() {
       state.codeMsg = '';
       saveStore();
     }
-  }
-
-  // The confirmation screen is only reachable straight after an order.
-  if (route === 'done' && !state.order) {
-    location.replace('#/');
-    return;
   }
 
   render();
@@ -1009,7 +1001,7 @@ function tabbar() {
   const tabs = [
     ['#/', 'home', 'خانه', ['home']],
     ['#/shop', 'grid', 'فروشگاه', ['shop', 'collection', 'product']],
-    ['#/cart', 'bag', 'سبد', ['cart', 'checkout', 'done']],
+    ['#/cart', 'bag', 'سبد', ['cart', 'checkout']],
     ['#/track', 'package', 'پیگیری', ['track']],
     ['#/contact', 'user', 'تماس', ['contact', 'about', 'faq']],
   ];
@@ -1708,11 +1700,6 @@ function screenCheckout() {
               </button>`
             ).join('')}
           </div>
-          ${
-            state.pay === 'card'
-              ? `<div class="alert alert-info">پس از ثبت سفارش شماره کارت را برای شما می‌فرستیم. سفارش بعد از دریافت فیش آماده‌سازی می‌شود.</div>`
-              : ''
-          }
         </section>
       </div>
 
@@ -1742,72 +1729,61 @@ function screenCheckout() {
         <div class="sum-row total"><span>قابل پرداخت</span><span data-sum="total">${money(t.total)}</span></div>
         <div data-sum="ship-hint">${shipHintHtml(t)}</div>
         ${state.error ? `<div class="alert alert-error">${esc(state.error)}</div>` : ''}
-        <button class="btn btn-accent btn-block" style="margin-top:18px" data-act="place-order" ${
-          state.placingOrder ? 'disabled' : ''
-        }>${
-    isOnlinePayment()
-      ? state.placingOrder ? 'در حال انتقال به درگاه…' : 'پرداخت آنلاین'
-      : state.placingOrder ? 'در حال ثبت سفارش…' : 'ثبت سفارش'
-  }</button>
-        <p class="muted" style="margin-top:12px;font-size:13px">${
+        ${
           isOnlinePayment()
-            ? 'پس از ثبت سفارش به درگاه امن زرین‌پال منتقل می‌شوید.'
-            : 'سفارش شما ثبت می‌شود؛ پرداخت طبق روش انتخابی هماهنگ خواهد شد.'
-        }</p>
+            ? `<button class="btn btn-accent btn-block" style="margin-top:18px" data-act="place-order" ${
+                state.placingOrder ? 'disabled' : ''
+              }>${state.placingOrder ? 'در حال انتقال به درگاه…' : 'پرداخت آنلاین'}</button>
+        <p class="muted" style="margin-top:12px;font-size:13px">پس از ثبت سفارش به درگاه امن زرین‌پال منتقل می‌شوید.</p>`
+            : payByContactHtml()
+        }
       </aside>
     </div>
   </div>
 
   <div class="action-bar">
     <div class="ab-info"><b data-sum="total">${money(t.total)}</b>قابل پرداخت</div>
-    <button class="btn btn-accent" data-act="place-order" ${state.placingOrder ? 'disabled' : ''}>${
-    isOnlinePayment()
-      ? state.placingOrder ? 'در حال انتقال…' : 'پرداخت آنلاین'
-      : state.placingOrder ? 'در حال ثبت…' : 'ثبت سفارش'
-  }</button>
+    ${
+      isOnlinePayment()
+        ? `<button class="btn btn-accent" data-act="place-order" ${state.placingOrder ? 'disabled' : ''}>${
+            state.placingOrder ? 'در حال انتقال…' : 'پرداخت آنلاین'
+          }</button>`
+        : `<a class="btn btn-accent" href="${contactTelHref()}">${icon('phone', 'icon icon-sm')} تماس برای پرداخت</a>`
+    }
   </div>`;
 }
 
-function screenDone() {
-  const o = state.order;
-  if (!o) return screenHome();
+/* ---- Paying by contacting the shop ----------------------------------------
+   «کارت به کارت» places no order, saves nothing and sends nothing: checkout
+   shows this box instead of the order button, and the cart stays as it is.
+   The same box stands in for online payment if ONLINE_PAYMENT is switched
+   off in data.js, since online payment is the only way to place an order. */
+
+const CARD_TO_CARD_MSG = 'برای پرداخت کارت به کارت، لطفاً با ما تماس بگیرید یا پیام بدهید';
+const ONLINE_OFF_MSG = 'پرداخت آنلاین فعلاً در دسترس نیست. برای خرید، لطفاً با ما تماس بگیرید یا پیام بدهید';
+
+/** tel: link for COPY.contactPhone (data.js — the number on the contact page
+ * and in the footer), e.g. «۰۹۱۹۵۸۱۹۲۰۳» → "tel:+989195819203". */
+function contactTelHref() {
+  const digits = toLatinDigits(COPY.contactPhone).replace(/\D/g, '');
+  return 'tel:' + (digits.startsWith('0') ? '+98' + digits.slice(1) : digits);
+}
+
+function payByContactHtml() {
   return `
-  <div class="shell-narrow screen">
-    <img class="page-motif" src="images/motif-flower.png" alt="">
-    <div class="done">
-      <div class="done-mark">${icon('check')}</div>
-      <h1 class="page-title">سفارش ثبت شد</h1>
-      <p class="lead" style="margin:12px auto 0">${esc(o.name)} عزیز، سفارش شما ثبت شد. جزئیات به شماره ${esc(
-    o.phone
-  )} پیامک می‌شود.</p>
-      <div class="order-code ltr">${esc(o.no)}</div>
-    </div>
-
-    <div class="panel" style="margin-top:30px">
-      <h3>جزئیات سفارش</h3>
-      ${o.rows
-        .map(
-          (r) => `<div class="sum-row"><span>${esc(r.fa)} × ${esc(r.qtyFa)}</span><span>${esc(
-            r.lineFa
-          )}</span></div>`
-        )
-        .join('')}
-      <div class="sum-row" style="border-top:1px solid var(--color-divider);margin-top:8px;padding-top:12px">
-        <span>روش ارسال</span><span>${esc(o.shipLabel)}</span>
-      </div>
-      <div class="sum-row"><span>روش پرداخت</span><span>${esc(o.payLabel)}</span></div>
-      <div class="sum-row total"><span>مبلغ کل</span><span>${esc(o.totalFa)}</span></div>
-    </div>
-
-    <div class="alert alert-info" style="margin-top:20px">
-      سفارش شما ثبت شد. برای هماهنگی پرداخت و ارسال با شما تماس گرفته می‌شود؛ پیامک خودکار هنوز فعال نیست.
-    </div>
-
-    <div style="display:flex;gap:12px;margin-top:24px;flex-wrap:wrap">
-      <button class="btn btn-primary" data-nav="#/shop">ادامه‌ی خرید</button>
-      <button class="btn btn-ghost" data-nav="#/track">پیگیری سفارش</button>
-    </div>
-  </div>`;
+        <div class="pay-contact" role="note">
+          <p>${state.pay === 'card' && ONLINE_PAYMENT.enabled ? CARD_TO_CARD_MSG : ONLINE_OFF_MSG}</p>
+          <div class="pay-contact-links">
+            <a class="btn btn-accent" href="${contactTelHref()}">${icon('phone', 'icon icon-sm')}<span class="ltr">${esc(
+    COPY.contactPhone
+  )}</span></a>
+            <a class="btn btn-ghost" href="${esc(COPY.instagramUrl)}" target="_blank" rel="noopener">${icon(
+    'instagram',
+    'icon icon-sm'
+  )}پیام در اینستاگرام</a>
+            <button class="btn btn-ghost" data-nav="#/contact">صفحه‌ی تماس با ما</button>
+          </div>
+        </div>`;
 }
 
 function screenPayment() {
@@ -2048,7 +2024,6 @@ const SCREENS = {
   product: screenProduct,
   cart: screenCart,
   checkout: screenCheckout,
-  done: screenDone,
   about: screenAbout,
   contact: screenContact,
   faq: screenFaq,
@@ -2063,7 +2038,6 @@ const TITLES = {
   product: 'محصول — Glow Home',
   cart: 'سبد خرید — Glow Home',
   checkout: 'تسویه‌حساب — Glow Home',
-  done: 'سفارش ثبت شد — Glow Home',
   about: 'درباره ما — Glow Home',
   contact: 'تماس — Glow Home',
   faq: 'سوالات متداول — Glow Home',
@@ -2190,6 +2164,9 @@ function syncForm() {
 }
 
 function placeOrder() {
+  // Online payment is the only way to place an order: «کارت به کارت» shows
+  // payByContactHtml() instead of a button, and nothing is sent for it.
+  if (!isOnlinePayment()) return;
   // Already submitting: a second click (or tap on the other pay button) does
   // nothing at all — it can never start a second order.
   if (state.placingOrder) return;
@@ -2233,43 +2210,7 @@ function placeOrder() {
     discount_code: state.appliedCode,
   };
 
-  if (isOnlinePayment()) return startOnlinePayment(payload, fail);
-
-  fetch('/api/orders', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-    .then((r) => r.json())
-    .then((res) => {
-      state.placingOrder = false;
-      if (!res.ok) return fail(res.error || 'ثبت سفارش با خطا مواجه شد. دوباره تلاش کنید.');
-
-      // Snapshot: the confirmation screen must survive the cart being cleared.
-      state.order = {
-        no: res.code,
-        rows: res.items.map((r) => ({ fa: r.fa, qtyFa: FA(r.qty), lineFa: money(r.line) })),
-        totalFa: money(res.total),
-        shipLabel: res.shipLabel === 'رایگان' || res.shipLabel === 'پس‌کرایه' ? res.shipLabel : money(Number(res.shipLabel)),
-        payLabel: (PAYMENTS.find((p) => p.id === state.pay) || PAYMENTS[0]).label,
-        name: f.name,
-        // Canonical 09XXXXXXXXX, not the +98 form actually sent — this is
-        // what's really stored, and what a later /track lookup needs typed.
-        phone: normalizeIranPhone(fullPhone),
-      };
-
-      state.cart = {};
-      state.appliedCode = null;
-      state.code = '';
-      state.codeMsg = '';
-      state.error = '';
-      saveStore();
-      go('done');
-    })
-    .catch(() => {
-      state.placingOrder = false;
-      fail('اتصال برقرار نشد. اینترنت خود را بررسی کنید و دوباره تلاش کنید.');
-    });
+  startOnlinePayment(payload, fail);
 
   function fail(msg) {
     state.error = msg;
@@ -2280,8 +2221,8 @@ function placeOrder() {
 }
 
 /* ---- Online payment (ZarinPal, behind ONLINE_PAYMENT.enabled) -----------
-   Only «درگاه پرداخت آنلاین» uses it. «کارت به کارت» and everything else
-   while the flag is off still go through /api/orders above, unchanged. */
+   «درگاه پرداخت آنلاین» — the only way to place an order. With the flag off
+   (or «کارت به کارت» chosen) checkout shows payByContactHtml() instead. */
 
 function isOnlinePayment() {
   return ONLINE_PAYMENT.enabled && state.pay === 'gateway';
