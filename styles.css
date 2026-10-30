@@ -1328,6 +1328,8 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
 .pay-contact-links { display: flex; flex-direction: column; gap: 8px; }
 .pay-contact-links .btn { width: 100%; gap: 8px; }
 .pay-contact-links .btn-ghost { background: var(--color-bg); }
+.pay-contact-call { margin-top: 10px; font-size: 13.5px; color: var(--color-neutral-600); text-align: center; }
+.pay-contact-call a { color: var(--color-accent-700); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .alert-whatsapp {
   background: var(--color-blue-100);
   color: var(--color-blue-700);

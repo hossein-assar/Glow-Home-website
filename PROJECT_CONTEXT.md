@@ -28,11 +28,21 @@ decisions from code alone — read this before making structural changes.
 - **Card-to-card («کارت به کارت»)**: places no order, saves nothing, sends
   no email, and leaves the cart as it is. Choosing it at checkout replaces
   the order button with a calm box (`payByContactHtml()` in `app.js`):
-  «برای پرداخت کارت به کارت، لطفاً با ما تماس بگیرید یا پیام بدهید», the
-  phone as a tap-to-call `tel:` link, Instagram and the contact page; on
-  phones the sticky action bar's button becomes «تماس برای پرداخت». The
-  number is `COPY.contactPhone` in `data.js` — the same constant the
-  contact page and footer show, so it changes in one place. The browser
+  «برای پرداخت کارت به کارت، لطفاً با ما تماس بگیرید یا پیام بدهید», a
+  «ارسال پیام در واتساپ» button, Instagram and the contact page, and under
+  it «یا تماس بگیرید: …» as a `tel:` link; on phones the sticky action
+  bar's button is «پیام در واتساپ». The WhatsApp link is
+  `https://wa.me/98…?text=…` (`whatsAppHref()`): the number in
+  international form without `+` (`contactPhoneIntl()`: Persian/Arabic
+  digits converted, non-digits dropped, leading 0 → 98), and the text
+  `encodeURIComponent`-encoded — a greeting, each cart line (name, size /
+  shade / colour when chosen, quantity), the total in تومان, and the city
+  if typed; never the name, phone, address, postcode or note. The city
+  field updates the page without a re-render, so the link is rebuilt the
+  moment it is pressed or clicked (`refreshWhatsAppLink`) — still no
+  render and no request. The number is `COPY.contactPhone` in `data.js` —
+  the same constant the contact page and footer show, so it changes in
+  one place (no copy of it in `app.js`). The browser
   never sent a payment method, so `/api/orders` could not refuse only
   card-to-card orders; it refuses all of them instead.
 - **Online-payment switch**: `ONLINE_PAYMENT.enabled` in `data.js` (on in
