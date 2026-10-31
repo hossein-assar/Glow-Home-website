@@ -1,6 +1,7 @@
-// «کارت به کارت» places no order: checkout shows a "contact us" box (a
-// WhatsApp link with the cart prefilled, Instagram, the contact page, and the
-// number as a tel: line) instead of the order button,
+// «کارت به کارت» places no order: checkout shows a "contact us" box
+// (Instagram and the contact page; a WhatsApp link with the cart prefilled
+// and the number as a tel: line only while data.js has a number — none for
+// now) instead of the order button,
 // nothing is sent and the cart stays. api/orders.js, which used to create
 // those orders, refuses every order. Online payment («پرداخت آنلاین», the
 // payment server) is the only way to order. Runs the real code, pulled out
@@ -69,9 +70,14 @@ test('api/orders.js keeps its pricing helpers', () => {
 
 // ---- checkout -------------------------------------------------------------------
 
-/** The real box, link and message code from app.js, with a stub cart:
- * totals() returns `rows` as cartLineData() would, plus the city's total. */
-function contactEnv({ pay = 'card', online = ONLINE_PAYMENT, phone = COPY.contactPhone, rows, total = 2600000, form = {} } = {}) {
+// Made-up numbers for the tests (the shop's real ones are in data.js).
+const CALL = '۰۹۱۲ ۳۴۵ ۶۷۸۹'; // → 989123456789
+const MSG_ONLY = '0935-111-2233'; // → 989351112233
+
+/** The real box, bar, link and message code from app.js, with a stub cart:
+ * totals() returns `rows` as cartLineData() would, plus the city's total.
+ * The numbers default to data.js's. */
+function contactEnv({ pay = 'card', online = ONLINE_PAYMENT, phone = COPY.contactPhone, whatsapp = COPY.contactWhatsapp, rows, total = 2600000, form = {} } = {}) {
   const state = {
     pay,
     form: { name: 'سارا', phone: '9121234567', city: '', address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '1234567890', note: 'یادداشت خصوصی', ...form },
@@ -89,17 +95,21 @@ function contactEnv({ pay = 'card', online = ONLINE_PAYMENT, phone = COPY.contac
      ${fnSrc('parseCartKey')}
      ${grab(appJs, /const CARD_TO_CARD_MSG = [^\n]*\n/)}
      ${grab(appJs, /const ONLINE_OFF_MSG = [^\n]*\n/)}
+     ${fnSrc('phoneIntl')}
      ${fnSrc('contactPhoneIntl')}
+     ${fnSrc('contactWhatsappIntl')}
      ${fnSrc('contactTelHref')}
      ${fnSrc('contactMessage')}
+     ${fnSrc('messageOnlyWhatsAppHref')}
      ${fnSrc('whatsAppHref')}
      ${fnSrc('whatsappIcon')}
      ${fnSrc('payByContactHtml')}
+     ${fnSrc('payByContactBarHtml')}
      ${fnSrc('refreshWhatsAppLink')}
-     return { contactPhoneIntl, contactTelHref, contactMessage, whatsAppHref, payByContactHtml, refreshWhatsAppLink };`
+     return { phoneIntl, contactPhoneIntl, contactWhatsappIntl, contactTelHref, contactMessage, messageOnlyWhatsAppHref, whatsAppHref, payByContactHtml, payByContactBarHtml, refreshWhatsAppLink };`
   )(
     state,
-    { ...COPY, contactPhone: phone },
+    { ...COPY, contactPhone: phone, contactWhatsapp: whatsapp },
     online,
     () => ({ rows: rows ?? CART_ROWS, total: total + (state.form.city && state.form.city !== 'تهران' ? 250000 : 0) }),
     () => { calls.push('fetch'); },
@@ -118,15 +128,71 @@ const CART_ROWS = [
 ];
 const textOf = (href) => new URL(href).searchParams.get('text') ?? '';
 
-test('the WhatsApp number comes from COPY.contactPhone: digits converted, leading 0 → 98', () => {
-  assert.equal(COPY.contactPhone, '۰۹۱۹۵۸۱۹۲۰۳'); // the number on the contact page and in the footer
-  for (const phone of ['۰۹۱۹۵۸۱۹۲۰۳', '٠٩١٩٥٨١٩٢٠٣', '09195819203', '0919 581 9203', '0919-581-9203', '+98 919 581 9203', '۰۹۱۹ ۵۸۱ ۹۲۰۳']) {
-    const e = contactEnv({ phone });
-    assert.equal(e.contactPhoneIntl(), '989195819203', phone);
-    assert.match(e.whatsAppHref(), /^https:\/\/wa\.me\/989195819203\?text=/, phone);
-    assert.equal(e.contactTelHref(), 'tel:+989195819203', phone);
+test('no shop number for now: both constants are empty in data.js', () => {
+  assert.equal(COPY.contactPhone, '');
+  assert.equal(COPY.contactWhatsapp, '');
+  assert.match(dataJs, /\n  contactPhone: '',\n  contactWhatsapp: '',\n/);
+});
+
+test('with no number the box has the message, Instagram (main button) and the contact page — no WhatsApp, no tel:, no number', () => {
+  for (const [pay, online, msg] of [['card', ONLINE_PAYMENT, /برای پرداخت کارت به کارت، لطفاً با ما تماس بگیرید یا پیام بدهید/], ['gateway', { enabled: false }, /پرداخت آنلاین فعلاً در دسترس نیست/]]) {
+    const e = contactEnv({ pay, online });
+    const html = e.payByContactHtml();
+    assert.match(html, msg, pay);
+    assert.ok(html.includes(`<a class="btn btn-accent" href="${COPY.instagramUrl}" target="_blank" rel="noopener"><svg data-icon="instagram"></svg>پیام در اینستاگرام</a>`), 'Instagram is the main button');
+    assert.ok(html.includes('<button class="btn btn-ghost" data-nav="#/contact">صفحه‌ی تماس با ما</button>'));
+    for (const gone of ['wa.me', 'data-wa', 'واتساپ', 'tel:', 'pay-contact-call', 'یا تماس بگیرید']) assert.ok(!html.includes(gone), gone);
+    assert.doesNotMatch(html.replace(/href="[^"]*"/g, ''), /[0-9۰-۹٠-٩]{4}/, 'no number on show');
+    assert.doesNotMatch(html, /data-act="place-order"/);
+    assert.equal(e.whatsAppHref(), '');
+    assert.equal(e.contactTelHref(), '');
   }
-  assert.doesNotMatch(appJs, /9195819203/, 'number hard-coded in app.js');
+});
+
+test('with no number the mobile action bar says «ارتباط برای پرداخت» and opens Instagram', () => {
+  const bar = contactEnv().payByContactBarHtml();
+  assert.equal(bar, `<a class="btn btn-accent" href="${COPY.instagramUrl}" target="_blank" rel="noopener"><svg data-icon="instagram"></svg> ارتباط برای پرداخت</a>`);
+  assert.match(fnSrc('screenCheckout'), /: payByContactBarHtml\(\)/);
+});
+
+test('numbers: any digits and spacing → 98…, empty or blank → ""', () => {
+  const { phoneIntl } = contactEnv();
+  for (const raw of ['۰۹۱۲۳۴۵۶۷۸۹', '٠٩١٢٣٤٥٦٧٨٩', '09123456789', '0912 345 6789', '0912-345-6789', '+98 912 345 6789', '۰۹۱۲ ۳۴۵ ۶۷۸۹']) {
+    assert.equal(phoneIntl(raw), '989123456789', raw);
+  }
+  for (const raw of ['', '   ', ' - ', undefined, null]) assert.equal(phoneIntl(raw), '', String(raw));
+});
+
+test('contactPhone set: the WhatsApp button, «یا تماس بگیرید» and the WhatsApp bar come back by themselves', () => {
+  const e = contactEnv({ phone: CALL });
+  const html = e.payByContactHtml();
+  const wa = html.match(/<a class="btn btn-accent" data-wa href="([^"]*)" target="_blank" rel="noopener noreferrer"><svg[^>]*>[\s\S]*?<\/svg>ارسال پیام در واتساپ<\/a>/);
+  assert.ok(wa, 'WhatsApp button');
+  assert.equal(wa[1].replace(/&amp;/g, '&'), e.whatsAppHref());
+  assert.match(e.whatsAppHref(), /^https:\/\/wa\.me\/989123456789\?text=/);
+  assert.ok(html.includes(`<a class="btn btn-ghost" href="${COPY.instagramUrl}"`), 'Instagram back to second');
+  assert.ok(html.includes('data-nav="#/contact"'));
+  assert.ok(html.includes(`<p class="pay-contact-call">یا تماس بگیرید: <a class="ltr" href="tel:+989123456789">${CALL}</a></p>`));
+  assert.match(e.payByContactBarHtml(), /^<a class="btn btn-accent" data-wa href="https:\/\/wa\.me\/989123456789\?text=[^"]*" target="_blank" rel="noopener noreferrer"><svg[\s\S]*<\/svg> پیام در واتساپ<\/a>$/);
+  assert.equal(e.messageOnlyWhatsAppHref(), '', 'no extra footer link for the call number');
+});
+
+test('contactWhatsapp only (messages): WhatsApp everywhere, but no tel: and no number on show', () => {
+  const e = contactEnv({ whatsapp: MSG_ONLY });
+  const html = e.payByContactHtml();
+  assert.match(e.whatsAppHref(), /^https:\/\/wa\.me\/989351112233\?text=/);
+  assert.ok(html.includes('data-wa href="https://wa.me/989351112233?text='));
+  assert.ok(!html.includes('tel:') && !html.includes('pay-contact-call'));
+  assert.ok(!html.replace(/href="[^"]*"/g, '').includes('2233'), 'the number is only inside the link');
+  assert.match(e.payByContactBarHtml(), /پیام در واتساپ/);
+  assert.equal(e.messageOnlyWhatsAppHref(), 'https://wa.me/989351112233');
+});
+
+test('both set: WhatsApp uses contactWhatsapp, the call line uses contactPhone', () => {
+  const e = contactEnv({ phone: CALL, whatsapp: MSG_ONLY });
+  assert.match(e.whatsAppHref(), /^https:\/\/wa\.me\/989351112233\?/);
+  assert.equal(e.contactTelHref(), 'tel:+989123456789');
+  assert.ok(e.payByContactHtml().includes('href="tel:+989123456789"'));
 });
 
 test('the message: greeting, each line with size / shade / colour and quantity, the total, the city if typed', () => {
@@ -146,13 +212,14 @@ test('the message: greeting, each line with size / shade / colour and quantity, 
 });
 
 test('the message never carries the name, phone, address, postcode or note', () => {
-  const text = textOf(contactEnv({ form: { city: 'تهران' } }).whatsAppHref());
+  const text = textOf(contactEnv({ phone: CALL, form: { city: 'تهران' } }).whatsAppHref());
+  assert.ok(text);
   for (const v of ['سارا', '9121234567', 'ولیعصر', '1234567890', 'یادداشت']) assert.ok(!text.includes(v), v);
 });
 
 test('the text is URL-encoded: nothing raw in the link, and it decodes back exactly', () => {
   const rows = [{ cartKey: 'x', fa: 'ست A&B #۲ ?=% "تست"', heightFa: '', qty: 3 }];
-  const e = contactEnv({ rows, form: { city: 'تهران - ونک' } });
+  const e = contactEnv({ phone: CALL, rows, form: { city: 'تهران - ونک' } });
   const href = e.whatsAppHref();
   const query = href.split('?text=')[1];
   assert.equal(query, encodeURIComponent(e.contactMessage()));
@@ -161,19 +228,6 @@ test('the text is URL-encoded: nothing raw in the link, and it decodes back exac
   assert.ok(query.includes('%26') && query.includes('%23'), '& and # encoded');
   assert.equal([...new URL(href).searchParams.keys()].join(), 'text', 'one text parameter only');
   assert.equal(textOf(href), e.contactMessage());
-});
-
-test('the box: «ارسال پیام در واتساپ» opening the WhatsApp link in a new tab, Instagram, the contact page, and a tel: line', () => {
-  const e = contactEnv();
-  const html = e.payByContactHtml();
-  assert.match(html, /برای پرداخت کارت به کارت، لطفاً با ما تماس بگیرید یا پیام بدهید/);
-  const wa = html.match(/<a class="btn btn-accent" data-wa href="([^"]*)" target="_blank" rel="noopener noreferrer"><svg[^>]*>[\s\S]*?<\/svg>ارسال پیام در واتساپ<\/a>/);
-  assert.ok(wa, 'WhatsApp button');
-  assert.equal(wa[1].replace(/&amp;/g, '&'), e.whatsAppHref());
-  assert.ok(html.includes(`href="${COPY.instagramUrl}"`));
-  assert.ok(html.includes('data-nav="#/contact"'));
-  assert.match(html, /<p class="pay-contact-call">یا تماس بگیرید: <a class="ltr" href="tel:\+989195819203">۰۹۱۹۵۸۱۹۲۰۳<\/a><\/p>/);
-  assert.doesNotMatch(html, /data-act="place-order"/);
 });
 
 test('with online payment switched off, every option shows the box with its own message', () => {
@@ -186,7 +240,7 @@ test('with online payment switched off, every option shows the box with its own 
 });
 
 test('pressing or clicking the WhatsApp link only refreshes its text (city typed since) — no request, no render', () => {
-  const e = contactEnv();
+  const e = contactEnv({ phone: CALL });
   const link = { href: e.whatsAppHref() };
   const target = { closest: (sel) => (sel === 'a[data-wa]' ? link : null) };
   e.state.form.city = 'اصفهان'; // typed after the render, without a re-render
@@ -194,9 +248,65 @@ test('pressing or clicking the WhatsApp link only refreshes its text (city typed
   assert.match(textOf(link.href), /شهر: اصفهان/);
   assert.match(textOf(link.href), /جمع: ۲٬۸۵۰٬۰۰۰ تومان/); // the packaging fee is in the total
   e.refreshWhatsAppLink({ target: { closest: () => null } }); // any other click: nothing
+  const none = contactEnv(); // no number: a stray data-wa link is left alone
+  const stray = { href: 'https://example.com/' };
+  none.refreshWhatsAppLink({ target: { closest: () => stray } });
+  assert.equal(stray.href, 'https://example.com/');
   assert.deepEqual(e.calls, []);
+  assert.deepEqual(none.calls, []);
   assert.match(appJs, /document\.addEventListener\('pointerdown', refreshWhatsAppLink, true\);/);
   assert.match(appJs, /document\.addEventListener\('click', refreshWhatsAppLink, true\);/);
+});
+
+// ---- footer and contact page ----------------------------------------------------
+
+/** footer() and screenContact() from app.js with the given numbers. */
+function pagesEnv({ phone = COPY.contactPhone, whatsapp = COPY.contactWhatsapp } = {}) {
+  const state = { contact: { name: '', phone: '', message: '', website: '' }, contactError: '', contactSending: false, contactSent: false };
+  return new Function(
+    'state', 'COPY', 'COLLECTIONS',
+    `const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+     const icon = (n) => '<svg data-icon="' + n + '"></svg>';
+     ${grab(appJs, /const CONTACT_NAME_MAX = [^\n]*\n/)}
+     ${grab(appJs, /const CONTACT_MSG_MAX = [^\n]*\n/)}
+     ${grab(appJs, /const FA_DIGITS = [^\n]*\n/)}
+     ${grab(appJs, /const AR_DIGITS = [^\n]*\n/)}
+     ${fnSrc('toLatinDigits')}
+     ${fnSrc('phoneIntl')}
+     ${fnSrc('contactPhoneIntl')}
+     ${fnSrc('messageOnlyWhatsAppHref')}
+     ${fnSrc('whatsappIcon')}
+     ${fnSrc('footer')}
+     ${fnSrc('screenContact')}
+     return { footer, screenContact };`
+  )(state, { ...COPY, contactPhone: phone, contactWhatsapp: whatsapp }, new Proxy({}, { get: () => ({ fa: 'دسته' }) }));
+}
+
+test('footer and contact page with no number: Instagram, hours (and the form) only — no empty row, no stray icon', () => {
+  const { footer, screenContact } = pagesEnv();
+  const foot = footer();
+  const contactCol = foot.slice(foot.lastIndexOf('<h4>تماس</h4>'));
+  assert.equal((contactCol.match(/<(a|span|button)\b/g) || []).length, 3, 'Instagram link (+ its handle) and the hours');
+  assert.ok(contactCol.includes(COPY.instagramUrl) && contactCol.includes(COPY.contactHours));
+  const page = screenContact();
+  assert.ok(page.includes('data-act="send-contact"'), 'the form');
+  assert.ok(page.includes(COPY.instagramUrl));
+  for (const html of [foot, page]) {
+    for (const gone of ['data-icon="phone"', 'tel:', 'wa.me', 'واتساپ', 'class="ltr" style="direction:ltr']) assert.ok(!html.includes(gone), gone);
+  }
+});
+
+test('footer and contact page: the number row comes back with contactPhone, a WhatsApp link (no digits) with contactWhatsapp', () => {
+  const withPhone = pagesEnv({ phone: CALL });
+  assert.ok(withPhone.footer().includes(`<span class="ltr" style="direction:ltr;text-align:right">${CALL}</span>`));
+  assert.ok(withPhone.screenContact().includes(`<svg data-icon="phone"></svg><span class="ltr" style="direction:ltr">${CALL}</span>`));
+  const withMsg = pagesEnv({ whatsapp: MSG_ONLY });
+  for (const html of [withMsg.footer(), withMsg.screenContact()]) {
+    assert.ok(html.includes('href="https://wa.me/989351112233"'));
+    assert.match(html, /پیام در واتساپ/);
+    assert.ok(!html.includes('tel:') && !html.includes('data-icon="phone"'));
+    assert.ok(!html.replace(/href="[^"]*"/g, '').includes('2233'), 'no digits on show');
+  }
 });
 
 function placeOrderEnv(pay, online = true) {
@@ -253,11 +363,7 @@ test('checkout: the order button only for online payment, the box otherwise; not
     assert.match(before, /isOnlinePayment\(\)\s*\?\s*`<button/, 'a place-order button outside the online-payment branch');
   }
   assert.match(checkout, /: payByContactHtml\(\)/);
-  assert.match(
-    checkout,
-    /: `<a class="btn btn-accent" data-wa href="\$\{esc\(whatsAppHref\(\)\)\}" target="_blank" rel="noopener noreferrer">\$\{whatsappIcon\(\)\} پیام در واتساپ<\/a>`/,
-    'mobile action bar: the same WhatsApp link'
-  );
+  assert.match(checkout, /: payByContactBarHtml\(\)/, 'mobile action bar');
   assert.doesNotMatch(appJs, /\/api\/orders['"`]/);
   assert.doesNotMatch(appJs, /screenDone|go\('done'\)|state\.order\b/);
   assert.deepEqual(PAYMENTS.map((p) => p.id), ['gateway', 'card']);

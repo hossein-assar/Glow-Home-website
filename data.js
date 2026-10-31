@@ -372,7 +372,15 @@ const COPY = {
 
   contactIntro: 'برای سفارش خاص، سوال درباره‌ی موجودی یا هر چیز دیگری بنویسید. معمولاً ظرف یک روز کاری پاسخ می‌دهیم.',
   contactHours: 'شنبه تا چهارشنبه<br> (به غیر از تعطیلات رسمی)',
-  contactPhone: '۰۹۱۹۵۸۱۹۲۰۳',
+  // The shop's numbers. Empty = hidden everywhere: no number, no tel: link,
+  // no WhatsApp link. Put a number back and every place shows it again by
+  // itself — contactPhone (calls and WhatsApp): the footer and contact-page
+  // row, «یا تماس بگیرید» and the WhatsApp button at checkout.
+  // contactWhatsapp (messages only): a WhatsApp link with no call link and
+  // no number on show; used for WhatsApp instead of contactPhone when set.
+  // Any digits and spacing: '۰۹۱۲ ۳۴۵ ۶۷۸۹', '09123456789', '+98 912 …'.
+  contactPhone: '',
+  contactWhatsapp: '',
   instagram: 'glow.home__',
   instagramUrl: 'https://www.instagram.com/glow.home__?stkn=MXViNXFlZHN5aXAyNg==',
 

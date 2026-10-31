@@ -986,7 +986,12 @@ function footer() {
                  style="display:flex;align-items:center;gap:7px">
                 ${icon('instagram', 'icon icon-sm')}<span class="ltr">@${esc(COPY.instagram)}</span>
               </a>
-              <span class="ltr" style="direction:ltr;text-align:right">${esc(COPY.contactPhone)}</span>
+              ${contactPhoneIntl() ? `<span class="ltr" style="direction:ltr;text-align:right">${esc(COPY.contactPhone)}</span>` : ''}
+              ${
+                messageOnlyWhatsAppHref()
+                  ? `<a href="${esc(messageOnlyWhatsAppHref())}" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;gap:7px">${whatsappIcon()}<span>پیام در واتساپ</span></a>`
+                  : ''
+              }
               <span>${COPY.contactHours}</span>
             </div>
           </div>
@@ -1748,7 +1753,7 @@ function screenCheckout() {
         ? `<button class="btn btn-accent" data-act="place-order" ${state.placingOrder ? 'disabled' : ''}>${
             state.placingOrder ? 'در حال انتقال…' : 'پرداخت آنلاین'
           }</button>`
-        : `<a class="btn btn-accent" data-wa href="${esc(whatsAppHref())}" target="_blank" rel="noopener noreferrer">${whatsappIcon()} پیام در واتساپ</a>`
+        : payByContactBarHtml()
     }
   </div>`;
 }
@@ -1762,17 +1767,30 @@ function screenCheckout() {
 const CARD_TO_CARD_MSG = 'برای پرداخت کارت به کارت، لطفاً با ما تماس بگیرید یا پیام بدهید';
 const ONLINE_OFF_MSG = 'پرداخت آنلاین فعلاً در دسترس نیست. برای خرید، لطفاً با ما تماس بگیرید یا پیام بدهید';
 
-/** COPY.contactPhone (data.js — the number on the contact page and in the
- * footer) in international form without "+": Persian/Arabic digits
- * converted, anything but digits dropped, the leading 0 replaced by 98.
- * «۰۹۱۲ ۳۴۵ ۶۷۸۹» → "989123456789". */
-function contactPhoneIntl() {
-  const digits = toLatinDigits(COPY.contactPhone).replace(/\D/g, '');
+/** A number from data.js in international form without "+": Persian/Arabic
+ * digits converted, anything but digits dropped, the leading 0 replaced by
+ * 98. «۰۹۱۲ ۳۴۵ ۶۷۸۹» → "989123456789". No number → "". */
+function phoneIntl(raw) {
+  const digits = toLatinDigits(String(raw || '')).replace(/\D/g, '');
+  if (!digits) return '';
   return digits.startsWith('98') ? digits : '98' + digits.replace(/^0/, '');
 }
 
+/** COPY.contactPhone, the number for calls (contact page, footer, «یا تماس
+ * بگیرید»). Empty in data.js → "" and every place that uses it hides. */
+function contactPhoneIntl() {
+  return phoneIntl(COPY.contactPhone);
+}
+
+/** The WhatsApp number: COPY.contactWhatsapp (messages only) if set, else
+ * COPY.contactPhone. Neither set → "" and no WhatsApp link anywhere. */
+function contactWhatsappIntl() {
+  return phoneIntl(COPY.contactWhatsapp) || contactPhoneIntl();
+}
+
 function contactTelHref() {
-  return 'tel:+' + contactPhoneIntl();
+  const intl = contactPhoneIntl();
+  return intl ? 'tel:+' + intl : '';
 }
 
 /** The prefilled WhatsApp message: a greeting, each cart line (name, size /
@@ -1796,8 +1814,18 @@ function contactMessage() {
   ].join('\n');
 }
 
+/** A plain WhatsApp link for the footer and contact page — only for a
+ * message-only number (COPY.contactWhatsapp), which is never shown as
+ * digits or as a call link. "" when it is empty. */
+function messageOnlyWhatsAppHref() {
+  const intl = phoneIntl(COPY.contactWhatsapp);
+  return intl ? 'https://wa.me/' + intl : '';
+}
+
+/** The checkout WhatsApp link with the cart prefilled; "" with no number. */
 function whatsAppHref() {
-  return 'https://wa.me/' + contactPhoneIntl() + '?text=' + encodeURIComponent(contactMessage());
+  const intl = contactWhatsappIntl();
+  return intl ? 'https://wa.me/' + intl + '?text=' + encodeURIComponent(contactMessage()) : '';
 }
 
 /** WhatsApp's logo (filled, so not one of the stroke icons in icon()). */
@@ -1807,20 +1835,35 @@ function whatsappIcon(cls = 'icon icon-sm') {
   );
 }
 
+/** The checkout box. The WhatsApp button and the «یا تماس بگیرید» line each
+ * show only while data.js has a number for them; Instagram and the contact
+ * page are always there. With no WhatsApp button, Instagram is the main one. */
 function payByContactHtml() {
+  const wa = whatsAppHref();
+  const tel = contactTelHref();
   return `
         <div class="pay-contact" role="note">
           <p>${state.pay === 'card' && ONLINE_PAYMENT.enabled ? CARD_TO_CARD_MSG : ONLINE_OFF_MSG}</p>
           <div class="pay-contact-links">
-            <a class="btn btn-accent" data-wa href="${esc(whatsAppHref())}" target="_blank" rel="noopener noreferrer">${whatsappIcon()}ارسال پیام در واتساپ</a>
-            <a class="btn btn-ghost" href="${esc(COPY.instagramUrl)}" target="_blank" rel="noopener">${icon(
+            ${wa ? `<a class="btn btn-accent" data-wa href="${esc(wa)}" target="_blank" rel="noopener noreferrer">${whatsappIcon()}ارسال پیام در واتساپ</a>` : ''}
+            <a class="btn ${wa ? 'btn-ghost' : 'btn-accent'}" href="${esc(COPY.instagramUrl)}" target="_blank" rel="noopener">${icon(
     'instagram',
     'icon icon-sm'
   )}پیام در اینستاگرام</a>
             <button class="btn btn-ghost" data-nav="#/contact">صفحه‌ی تماس با ما</button>
           </div>
-        </div>
-        <p class="pay-contact-call">یا تماس بگیرید: <a class="ltr" href="${contactTelHref()}">${esc(COPY.contactPhone)}</a></p>`;
+        </div>${
+          tel ? `\n        <p class="pay-contact-call">یا تماس بگیرید: <a class="ltr" href="${tel}">${esc(COPY.contactPhone)}</a></p>` : ''
+        }`;
+}
+
+/** The mobile action bar's button when online payment isn't the choice:
+ * WhatsApp with the cart if there is a number, else Instagram. */
+function payByContactBarHtml() {
+  const wa = whatsAppHref();
+  return wa
+    ? `<a class="btn btn-accent" data-wa href="${esc(wa)}" target="_blank" rel="noopener noreferrer">${whatsappIcon()} پیام در واتساپ</a>`
+    : `<a class="btn btn-accent" href="${esc(COPY.instagramUrl)}" target="_blank" rel="noopener">${icon('instagram', 'icon icon-sm')} ارتباط برای پرداخت</a>`;
 }
 
 // The city field and the cart update the page without re-rendering it, so a
@@ -1828,7 +1871,8 @@ function payByContactHtml() {
 // it again the moment it is pressed or clicked. Never renders, never sends.
 function refreshWhatsAppLink(e) {
   const a = e.target && e.target.closest ? e.target.closest('a[data-wa]') : null;
-  if (a) a.href = whatsAppHref();
+  const href = a ? whatsAppHref() : '';
+  if (href) a.href = href;
 }
 document.addEventListener('pointerdown', refreshWhatsAppLink, true);
 document.addEventListener('click', refreshWhatsAppLink, true);
@@ -1988,9 +2032,20 @@ function screenContact() {
         ${icon('instagram')}
         <a class="ltr" href="${esc(COPY.instagramUrl)}" target="_blank" rel="noopener">@${esc(COPY.instagram)}</a>
       </div>
-      <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
+      ${
+        contactPhoneIntl()
+          ? `<div style="display:flex;align-items:center;gap:12px;margin-top:14px">
         ${icon('phone')}<span class="ltr" style="direction:ltr">${esc(COPY.contactPhone)}</span>
-      </div>
+      </div>`
+          : ''
+      }
+      ${
+        messageOnlyWhatsAppHref()
+          ? `<div style="display:flex;align-items:center;gap:12px;margin-top:14px">
+        ${whatsappIcon('icon')}<a href="${esc(messageOnlyWhatsAppHref())}" target="_blank" rel="noopener noreferrer">پیام در واتساپ</a>
+      </div>`
+          : ''
+      }
       <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
         ${icon('clock')}<span>${COPY.contactHours}</span>
       </div>
