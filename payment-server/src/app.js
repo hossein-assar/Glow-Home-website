@@ -208,7 +208,7 @@ export function createApp({ config, db, zarinpal, logger = log, timeouts = DEFAU
 
         const amount = tomanToGatewayAmount(priced.total);
         if (!Number.isSafeInteger(amount) || amount <= 0 || amount > MAX_GATEWAY_AMOUNT) {
-          return reply(400, { ok: false, error: 'مبلغ این سفارش برای پرداخت آنلاین مجاز نیست. لطفاً با ما تماس بگیرید.' });
+          return reply(400, { ok: false, error: 'مبلغ این سفارش برای پرداخت آنلاین مجاز نیست. لطفاً از طریق اینستاگرام یا فرم تماس به ما پیام بدهید.' });
         }
 
         const code = await guard.run('order_code', () => db.nextOrderCode());

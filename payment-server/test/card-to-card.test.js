@@ -54,7 +54,8 @@ test('api/orders.js refuses every order with a clear error (410) — no database
     const res = await call(orders, { method: 'POST', body });
     assert.equal(res.statusCode, 410);
     assert.equal(res.body.ok, false);
-    assert.match(res.body.error, /کارت به کارت با ما تماس بگیرید/);
+    assert.match(res.body.error, /کارت به کارت از طریق اینستاگرام یا فرم تماس به ما پیام بدهید\./);
+    assert.doesNotMatch(res.body.error, /تماس بگیرید/);
   }
   assert.equal((await call(orders, { method: 'GET' })).statusCode, 405);
 });
@@ -135,13 +136,13 @@ test('no shop number for now: both constants are empty in data.js', () => {
 });
 
 test('with no number the box has the message, Instagram (main button) and the contact page — no WhatsApp, no tel:, no number', () => {
-  for (const [pay, online, msg] of [['card', ONLINE_PAYMENT, /برای پرداخت کارت به کارت، لطفاً با ما تماس بگیرید یا پیام بدهید/], ['gateway', { enabled: false }, /پرداخت آنلاین فعلاً در دسترس نیست/]]) {
+  for (const [pay, online, msg] of [['card', ONLINE_PAYMENT, /<p>برای پرداخت کارت به کارت، لطفاً از طریق اینستاگرام یا فرم تماس به ما پیام بدهید<\/p>/], ['gateway', { enabled: false }, /<p>پرداخت آنلاین فعلاً در دسترس نیست\. برای خرید، لطفاً از طریق اینستاگرام یا فرم تماس به ما پیام بدهید<\/p>/]]) {
     const e = contactEnv({ pay, online });
     const html = e.payByContactHtml();
     assert.match(html, msg, pay);
     assert.ok(html.includes(`<a class="btn btn-accent" href="${COPY.instagramUrl}" target="_blank" rel="noopener"><svg data-icon="instagram"></svg>پیام در اینستاگرام</a>`), 'Instagram is the main button');
     assert.ok(html.includes('<button class="btn btn-ghost" data-nav="#/contact">صفحه‌ی تماس با ما</button>'));
-    for (const gone of ['wa.me', 'data-wa', 'واتساپ', 'tel:', 'pay-contact-call', 'یا تماس بگیرید']) assert.ok(!html.includes(gone), gone);
+    for (const gone of ['wa.me', 'data-wa', 'واتساپ', 'tel:', 'pay-contact-call', 'تماس بگیرید']) assert.ok(!html.includes(gone), gone);
     assert.doesNotMatch(html.replace(/href="[^"]*"/g, ''), /[0-9۰-۹٠-٩]{4}/, 'no number on show');
     assert.doesNotMatch(html, /data-act="place-order"/);
     assert.equal(e.whatsAppHref(), '');
@@ -256,6 +257,28 @@ test('pressing or clicking the WhatsApp link only refreshes its text (city typed
   assert.deepEqual(none.calls, []);
   assert.match(appJs, /document\.addEventListener\('pointerdown', refreshWhatsAppLink, true\);/);
   assert.match(appJs, /document\.addEventListener\('click', refreshWhatsAppLink, true\);/);
+});
+
+test('nothing a customer sees says to call — only the «یا تماس بگیرید» line, shown only with contactPhone', () => {
+  const sources = {
+    'app.js': appJs, 'data.js': dataJs, 'api/orders.js': ordersJs,
+    'api/contact.js': read('../../api/contact.js'), 'api/track-order.js': read('../../api/track-order.js'),
+    'api/pay-callback.js': read('../../api/pay-callback.js'), 'index.html': read('../../index.html'),
+    'payment-server/src/app.js': read('../src/app.js'),
+  };
+  const calls = [];
+  for (const [file, src] of Object.entries(sources)) {
+    src.split('\n').forEach((line, i) => {
+      if (/^\s*(\/\/|\/?\*)/.test(line)) return; // comments
+      if (/تماس بگیر|زنگ بزن/.test(line)) calls.push(`${file}:${i + 1}`);
+    });
+  }
+  assert.deepEqual(calls.map((c) => c.split(':')[0]), ['app.js'], calls.join(', '));
+  assert.match(appJs.split('\n')[+calls[0].split(':')[1] - 1], /tel \? `[^`]*<p class="pay-contact-call">یا تماس بگیرید: <a class="ltr" href="\$\{tel\}">/);
+  for (const msg of ['CARD_TO_CARD_MSG', 'ONLINE_OFF_MSG']) {
+    assert.match(grab(appJs, new RegExp(`const ${msg} = [^\\n]*`)), /از طریق اینستاگرام یا فرم تماس به ما پیام بدهید';$/, msg);
+  }
+  assert.equal(PAYMENTS.find((p) => p.id === 'card').note, 'از طریق اینستاگرام یا فرم تماس پیام بدهید؛ سفارش در سایت ثبت نمی‌شود');
 });
 
 // ---- footer and contact page ----------------------------------------------------

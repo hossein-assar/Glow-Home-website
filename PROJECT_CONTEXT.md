@@ -28,7 +28,8 @@ decisions from code alone — read this before making structural changes.
 - **Card-to-card («کارت به کارت»)**: places no order, saves nothing, sends
   no email, and leaves the cart as it is. Choosing it at checkout replaces
   the order button with a calm box (`payByContactHtml()` in `app.js`):
-  «برای پرداخت کارت به کارت، لطفاً با ما تماس بگیرید یا پیام بدهید»,
+  «برای پرداخت کارت به کارت، لطفاً از طریق اینستاگرام یا فرم تماس به ما
+  پیام بدهید»,
   «پیام در اینستاگرام» and «صفحه‌ی تماس با ما». On phones the sticky
   action bar's button (`payByContactBarHtml()`) is «ارتباط برای پرداخت»
   and opens Instagram. While `data.js` has a shop number (none for now —
@@ -63,6 +64,14 @@ decisions from code alone — read this before making structural changes.
   form (it never spells the number out itself). The old number is still in
   git history and was in earlier deploys; that can't be undone without
   rewriting pushed history.
+  Nothing a customer sees says to call («تماس بگیرید») — it says «از طریق
+  اینستاگرام یا فرم تماس به ما پیام بدهید»: `CARD_TO_CARD_MSG`,
+  `ONLINE_OFF_MSG`, the failed-payment page, the tracking notice for a
+  failed payment, `RETIRED_ERROR` in `api/orders.js`, the card option's
+  note in `data.js`, and the payment server's "amount not allowed" error.
+  The one exception is the «یا تماس بگیرید» line, which shows only while
+  `contactPhone` is set; a test in `card-to-card.test.js` enforces this
+  (admin-only texts that point staff to the developer are left as they are).
 - **Online-payment switch**: `ONLINE_PAYMENT.enabled` in `data.js` (on in
   production). Setting it to `false` and deploying stops all ordering: every
   payment option then shows the same contact box with «پرداخت آنلاین فعلاً

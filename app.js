@@ -1764,8 +1764,8 @@ function screenCheckout() {
    The same box stands in for online payment if ONLINE_PAYMENT is switched
    off in data.js, since online payment is the only way to place an order. */
 
-const CARD_TO_CARD_MSG = 'برای پرداخت کارت به کارت، لطفاً با ما تماس بگیرید یا پیام بدهید';
-const ONLINE_OFF_MSG = 'پرداخت آنلاین فعلاً در دسترس نیست. برای خرید، لطفاً با ما تماس بگیرید یا پیام بدهید';
+const CARD_TO_CARD_MSG = 'برای پرداخت کارت به کارت، لطفاً از طریق اینستاگرام یا فرم تماس به ما پیام بدهید';
+const ONLINE_OFF_MSG = 'پرداخت آنلاین فعلاً در دسترس نیست. برای خرید، لطفاً از طریق اینستاگرام یا فرم تماس به ما پیام بدهید';
 
 /** A number from data.js in international form without "+": Persian/Arabic
  * digits converted, anything but digits dropped, the leading 0 replaced by
@@ -1901,7 +1901,7 @@ function screenPayment() {
     ${
       r.ok
         ? ''
-        : `<div class="alert alert-error" style="margin-top:12px">اگر مبلغی از حساب شما کسر شده ولی پرداخت تأیید نشده، مبلغ معمولاً ظرف ۷۲ ساعت توسط بانک بازگردانده می‌شود. در غیر این صورت با ما تماس بگیرید.</div>`
+        : `<div class="alert alert-error" style="margin-top:12px">اگر مبلغی از حساب شما کسر شده ولی پرداخت تأیید نشده، مبلغ معمولاً ظرف ۷۲ ساعت توسط بانک بازگردانده می‌شود. در غیر این صورت از طریق اینستاگرام یا فرم تماس به ما پیام بدهید.</div>`
     }
 
     <div style="display:flex;gap:12px;margin-top:24px;flex-wrap:wrap">
@@ -2061,7 +2061,7 @@ function screenContact() {
 const TRACK_STEP = { pending: 1, paid: 1, preparing: 2, shipped: 3, delivered: 3 };
 const TRACK_PAYMENT_NOTICE = {
   pending_payment: 'پرداخت آنلاین این سفارش هنوز تأیید نشده است. اگر پرداخت را کامل نکرده‌اید، سفارش ارسال نمی‌شود.',
-  payment_failed: 'پرداخت آنلاین این سفارش ناموفق بود و سفارش ارسال نمی‌شود. اگر مبلغی از حساب شما کسر شده، با ما تماس بگیرید.',
+  payment_failed: 'پرداخت آنلاین این سفارش ناموفق بود و سفارش ارسال نمی‌شود. اگر مبلغی از حساب شما کسر شده، از طریق اینستاگرام یا فرم تماس به ما پیام بدهید.',
 };
 
 function screenTrack() {

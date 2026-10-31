@@ -16,7 +16,7 @@
 // in payment-server/ checks the copies still match.
 
 const RETIRED_ERROR =
-  'ثبت سفارش از این مسیر انجام نمی‌شود. برای خرید از «پرداخت آنلاین» در صفحه‌ی تکمیل خرید استفاده کنید؛ برای پرداخت کارت به کارت با ما تماس بگیرید.';
+  'ثبت سفارش از این مسیر انجام نمی‌شود. برای خرید از «پرداخت آنلاین» در صفحه‌ی تکمیل خرید استفاده کنید؛ برای پرداخت کارت به کارت از طریق اینستاگرام یا فرم تماس به ما پیام بدهید.';
 
 // Mirrors data.js — kept in sync by hand since this is server-side business
 // logic, not sensitive data, and duplicating it here avoids needing a build

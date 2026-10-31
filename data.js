@@ -286,7 +286,7 @@ const SHIPPING = [
 
 const PAYMENTS = [
   { id: 'gateway', label: 'درگاه پرداخت آنلاین', note: 'زرین‌پال / آیدی‌پی' },
-  { id: 'card', label: 'کارت به کارت', note: 'با ما تماس بگیرید؛ سفارش در سایت ثبت نمی‌شود' },
+  { id: 'card', label: 'کارت به کارت', note: 'از طریق اینستاگرام یا فرم تماس پیام بدهید؛ سفارش در سایت ثبت نمی‌شود' },
 ];
 
 // Online payment through ZarinPal (payment-server/, on the Iranian VPS) —
