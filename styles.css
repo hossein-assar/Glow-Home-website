@@ -908,32 +908,31 @@ button.media.gallery-cover {
 .card .btn { margin-top: auto; }
 
 /* ---- Home / hero --------------------------------------------------------
-   Full-bleed banner: the photo runs edge to edge behind the header's
-   shell width, with the headline sitting in a translucent card on top —
-   this keeps the text legible regardless of what part of the photo lands
-   behind it, without relying on a directional gradient (which would need
-   to flip for RTL). */
+   Full-width banner: the whole photo, edge to edge and never cropped — the
+   box takes the image's own aspect ratio (width/height on the <img>), so
+   its height follows the screen width. The headline sits in a translucent
+   card on top, which keeps the text legible regardless of what part of the
+   photo lands behind it, without relying on a directional gradient (which
+   would need to flip for RTL). */
 
-.hero {
-  position: relative;
-  overflow: hidden;
-  min-height: 62vh;
-  max-height: 640px;
-  display: flex;
-  align-items: center;
-}
+/* Capped at 1440 px (≤ 960 px tall) so the 1620 px photo is never
+   stretched far past its real size; wider screens show the page background
+   beside it. */
+.hero { position: relative; max-width: 1440px; margin-inline: auto; }
 .hero-bg {
-  position: absolute;
-  inset: 0;
+  display: block;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
-  /* hero.jpg: the lamp stands just right of centre with the shade near
-     the top, so keep the top of the shade in view when the banner crops. */
-  object-position: 50% 14%;
+  height: auto;
   filter: saturate(0.92);
 }
-.hero-inner { position: relative; z-index: 1; width: 100%; padding-block: 40px; }
+.hero-inner {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  padding-block: 40px;
+}
 .hero-copy {
   max-width: 460px;
   /* On the left (inline end in RTL), over the plant, so the lamp on the
@@ -1571,7 +1570,23 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
    ========================================================================== */
 
 @media (max-width: 1000px) {
-  .hero { min-height: 46vh; max-height: 460px; }
+  /* Up to here the card would cover most of the photo (or the lamp), and
+     on phones it would outgrow it: the text goes under the photo instead,
+     so the photo stays fully visible and the text gets the room it needs. */
+  .hero-inner { position: static; display: block; padding-block: 22px 6px; }
+  .hero-copy {
+    max-width: none;
+    padding: 0;
+    background: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    color: var(--color-text);
+    border-radius: 0;
+  }
+  .hero-copy h1 { color: var(--color-text); }
+  .hero-copy .lead { color: var(--color-neutral-700); }
+  .hero-copy .btn-ghost { color: var(--color-text); border-color: var(--color-divider); }
+  .hero-copy .btn-ghost:hover { background: var(--color-surface); }
   .product { grid-template-columns: 1fr; gap: 26px; }
   .cart-layout, .checkout-layout { grid-template-columns: 1fr; gap: 26px; }
   .studio-strip { grid-template-columns: 1fr; }
@@ -1589,27 +1604,6 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
   :root { --shell-pad: 18px; --tabbar-h: 68px; }
 
   body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
-
-  /* On phones, an overlay card can't shrink enough to leave the photo
-     visible once the heading + body copy wrap to several lines — it just
-     grows until it covers the whole banner. Stacking the text below the
-     photo instead means there's no competition for space: the photo stays
-     fully visible and the text gets as much room as it needs. */
-  .hero { display: block; position: static; min-height: 0; max-height: none; overflow: visible; }
-  .hero-bg { position: static; width: 100%; height: 260px; object-fit: cover; }
-  .hero-inner { padding-block: 22px 6px; }
-  .hero-copy {
-    max-width: none;
-    padding: 0;
-    background: none;
-    backdrop-filter: none;
-    color: var(--color-text);
-    border-radius: 0;
-  }
-  .hero-copy h1 { color: var(--color-text); }
-  .hero-copy .lead { color: var(--color-neutral-700); }
-  .hero-copy .btn-ghost { color: var(--color-text); border-color: var(--color-divider); }
-  .hero-copy .btn-ghost:hover { background: var(--color-surface); }
 
   .header-top { padding-block: 12px; gap: 8px; }
   .wordmark-badge { height: 46px; }

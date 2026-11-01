@@ -307,12 +307,18 @@ the base size. The storefront drops any cart line it can't price —
   `images/banner-lamps.jpg` (lilac lamp on a wooden desk, 1600×1067). Both
   were prepared like every site photo: EXIF orientation applied, all
   EXIF/GPS/XMP removed, long side ≤ 2000 px (hero) / 1600 px (banner),
-  JPEG quality 82, progressive — about 150 KB / 125 KB. On screens wider
-  than 760 px the hero's headline card sits on the left (inline end,
-  `margin-inline-start: auto`) over the plant so the lamp stays visible,
-  and `.hero-bg` uses `object-position: 50% 14%` to keep the top of the
-  shade in view; a new hero photo with its subject elsewhere needs those
-  two looked at again. `og:image` in index.html is the absolute
+  JPEG quality 82, progressive — about 150 KB / 125 KB.
+  The hero is **never cropped**: the `<img>` has `width="1620"
+  height="1080"` and `width: 100%; height: auto`, so the hero takes the
+  photo's own 3:2 ratio (no fixed height, no `object-fit`/`object-position`,
+  no blur fill). It is capped at 1440 px wide (≤ 960 px tall), centred,
+  with the page background beside it on wider screens. Above 1000 px the
+  headline card is overlaid on the left (inline end,
+  `margin-inline-start: auto`), vertically centred, over the plant so the
+  lamp stays visible; at 1000 px and below the text goes under the photo.
+  A new hero photo needs its `width`/`height` attributes in `home()`
+  updated, and the card position looked at again if its subject is
+  elsewhere. `og:image` in index.html is the absolute
   `https://glow-home.ir/images/hero.jpg` (link previews ignore relative
   URLs).
 - **Persian/Arabic-digit handling is inconsistent on purpose**: کد پستی

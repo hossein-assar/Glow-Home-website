@@ -1079,7 +1079,7 @@ function screenHome() {
 
   return `
   <section class="hero">
-    <img class="hero-bg" src="images/hero.jpg" alt="آباژور سفالی با شید طنابی کرم روی چهارپایه‌ی چوبی، کنار گلدان گیاه">
+    <img class="hero-bg" src="images/hero.jpg" width="1620" height="1080" alt="آباژور سفالی با شید طنابی کرم روی چهارپایه‌ی چوبی، کنار گلدان گیاه">
     <div class="shell hero-inner">
       <div class="hero-copy">
         <h1>${esc(COPY.heroTitle)}</h1>
