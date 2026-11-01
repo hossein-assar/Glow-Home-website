@@ -230,14 +230,18 @@ decisions from code alone — read this before making structural changes.
   a new window (not a hidden iframe — Safari prints the parent page instead)
   and writes `orderPrintHtml(order, items, location.origin)` into it, built
   only from the order already loaded in the panel (no request), then opens
-  the print dialog once IRANSansX has loaded. A4 portrait, black on white:
-  header (Glow Home / برگه سفارش, order code, date), a bordered «ارسال به»
-  shipping label (name, mobile, address, city, postcode, method), right
-  under it a smaller «فرستنده» box (1.5px border, 12pt, one line: «سحر راد
-  — +98 935 … » with the number in `.ltr`), any customer note, a ✂ cut
-  line (so the sender is part of the cut-off parcel label), the items table with جمع اقلام / packaging
-  fee / discount / total, the payment line (online paid + کد پیگیری, or
-  «پرداخت‌نشده» for pending/failed online orders), two tick boxes
+  the print dialog once IRANSansX and the watermark image have loaded — at
+  most `PRINT_WAIT_MS` (3 s), so it never hangs; a watermark that fails to
+  load is removed. A4 portrait, black on white, in this order: header
+  (Glow Home / برگه سفارش, order code, date); the parcel label in
+  `.label-area` (white background, above the watermark) — a small
+  «فرستنده» box (1.5px border, 12pt, one line «فرستنده: سحر راد — +98 935 …»
+  with the number in `.ltr`), 3 mm below it the «گیرنده» heading and the
+  bordered recipient box (name 19pt, mobile, address, city, postcode,
+  method), then any customer note; a ✂ cut line (everything above it is
+  the label); then the slip (`.slip`): items table with جمع اقلام /
+  packaging fee / discount / total, the payment line (online paid + کد
+  پیگیری, or «پرداخت‌نشده» for pending/failed online orders), two tick boxes
   (بسته‌بندی شد / ارسال شد) and a footer with glow-home.ir and the Instagram
   handle (`SHOP_INSTAGRAM`, mirrored from data.js; a test keeps them equal).
   The sender is `SHOP_SENDER_NAME` / `SHOP_SENDER_PHONE` in admin.js, the
@@ -248,8 +252,20 @@ decisions from code alone — read this before making structural changes.
   links to it, and `whatsapp-number.test.js` allows the number in exactly
   two lines: data.js `contactWhatsapp` and admin.js `SHOP_SENDER_PHONE`.
   Every order value is escaped. Never printed: the card number, and any
-  phone number but the customer's and the sender's (never the old one). Up to ~8 items fit one page; rows don't split, longer
-  orders continue on a second page. Tests: `admin-orders.test.js`.
+  phone number but the customer's and the sender's (never the old one).
+  **Watermark:** the storefront's line-art daffodil, the same file
+  `images/motif-flower.png` (183 KB, no copy), as one `<img class="watermark">`
+  inside `.slip` — never in the label — with an absolute URL from the
+  admin's origin like the fonts, `filter: grayscale(1)`, `opacity: 0.3`
+  (the PNG's lines are themselves only ~42% opaque, so this prints them like
+  solid lines at ~0.12: measured grey ~238/255) and `print-color-adjust:
+  exact` (an element, not a CSS background, which browsers drop). It sits
+  at the bottom-left corner of the slip, behind the totals and footer, and
+  `.slip` clips it (`overflow: clip`) so it can never add a page. On a
+  cheap printer that drops light greys it simply disappears; the text is
+  unaffected.
+  Up to ~8 items fit one page; rows don't split, longer orders continue on
+  a second page. Tests: `admin-orders.test.js`.
 
 ## Catalog data model (products table)
 

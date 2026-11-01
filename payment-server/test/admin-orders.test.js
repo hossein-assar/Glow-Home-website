@@ -162,13 +162,14 @@ test('print: name, address, notes and the other order fields are escaped — not
   };
   const items = [{ product_id: 'p', name_fa: '<img src=y onerror=alert(2)>', qty: 1, unit_price: 1 }, { product_id: null, name_fa: '<fee>', qty: 1, unit_price: 1 }];
   const html = orderPrintHtml({ ...evil, total: 1 }, items);
-  for (const raw of ['<script>', '<img', '<svg', '<u>', '<b>bold', '<i>', '<x>', '<y>', '<fee>', 'GH-1<i>', 'onerror=alert(1)>', '0912"']) {
+  for (const raw of ['<script>', '<img src=x', '<img src=y', '<svg', '<u>', '<b>bold', '<i>', '<x>', '<y>', '<fee>', 'GH-1<i>', 'onerror=alert(1)>', '0912"']) {
     assert.ok(!html.includes(raw), 'raw: ' + raw);
   }
   for (const esc of ['&lt;script&gt;alert(1)&lt;/script&gt;', '&quot;&gt;&lt;img src=x onerror=alert(1)&gt; &#39;q&#39;', '&lt;b&gt;bold&lt;/b&gt; &amp; &quot;quotes&quot;', '&lt;img src=y onerror=alert(2)&gt;']) {
     assert.ok(html.includes(esc), 'escaped: ' + esc);
   }
   assert.equal((html.match(/<script/gi) || []).length, 0, 'the page has no script at all');
+  assert.equal((html.match(/<img /g) || []).length, 1, 'the only image is the watermark');
 });
 
 // The sender number as digits only, read from data.js — never typed here.
@@ -181,23 +182,30 @@ test('print: no card number; the only phone numbers are the customer\'s and the 
   const latin = html.replace(/[۰-۹]/g, (d) => d.charCodeAt(0) - 0x6f0).replace(/[٠-٩]/g, (d) => d.charCodeAt(0) - 0x660);
   const phones = [...latin.matchAll(/(?<![0-9])(?:\+98|0098|0)?[\s]?9[0-9]{2}[\s\-.]?[0-9]{3}[\s\-.]?[0-9]{4}(?![0-9])/g)]
     .map((m) => m[0].replace(/\D/g, '').replace(/^(0098|98|0)/, ''));
-  assert.deepEqual(phones, ['9121234567', SENDER_DIGITS.slice(2)], 'the customer\'s mobile, then the sender\'s');
+  assert.deepEqual(phones, [SENDER_DIGITS.slice(2), '9121234567'], 'the sender\'s number (top of the label), then the customer\'s mobile');
   // the old shop number (see old-phone-number.test.js), in any digit form
   const OLD = [9, 1, 9, 5, 8, 1, 9, 2, 0, 3];
   assert.doesNotMatch(latin, new RegExp(OLD.join('[\\s\\-.]*')));
 });
 
-test('print: «فرستنده» — the shop\'s name and number, smaller, between the recipient box and the cut line', () => {
+test('print: the label reads sender → «گیرنده» + recipient box → notes → ✂, once each, for paid, pending and failed orders', () => {
   for (const o of [ORDER, { ...ORDER, status: 'pending_payment', paid_at: null, payment_ref_id: null }, { ...ORDER, status: 'payment_failed', paid_at: null }]) {
     const html = orderPrintHtml(o, ITEMS);
     // «فرستنده:» bold with its colon, a normal space, then the name and the number
     const sender = `<div class="sender"><b>فرستنده:</b> سحر راد — <span class="ltr">${env.phoneDisplay(env.SHOP_SENDER_PHONE)}</span></div>`;
-    assert.equal(html.split(sender).length, 2, 'once, for status ' + o.status);
-    const at = (s) => html.indexOf(s);
-    assert.ok(at('<div class="method">') < at(sender) && at(sender) < at('<div class="notes">') && at('<div class="notes">') < at('<div class="cut"'), 'recipient box → sender → notes → ✂');
+    const order = ['<div class="block label-area">', sender, '<h2>گیرنده</h2>', '<div class="label">', '<div class="name">', '<div class="method">', '<div class="notes">', '<div class="cut"'];
+    for (const part of order) assert.equal(html.split(part).length, 2, `once: ${part} (${o.status})`);
+    const at = order.map((part) => html.indexOf(part));
+    assert.ok(at.every((i, k) => k === 0 || i > at[k - 1]), `order (${o.status}): ${at}`);
+    // the notes close the label area, and the cut line comes right after it
+    assert.match(html, /<div class="notes">[^]*?<\/div>\n  <\/div>\n\n  <div class="cut"/);
   }
+  assert.ok(!orderPrintHtml(ORDER, ITEMS).includes('ارسال به'), '«ارسال به» is gone');
+  assert.ok(!adminJs.includes('ارسال به'));
   const css = orderPrintHtml(ORDER, ITEMS);
-  assert.match(css, /\.sender \{ border: 1\.5px solid #000; padding: 1\.5mm 4mm; margin-top: 3mm; font-size: 12pt; \}/);
+  assert.match(css, /\.sender \{ border: 1\.5px solid #000; padding: 1\.5mm 4mm; font-size: 12pt; \}/);
+  assert.match(css, /\.label-area h2 \{ margin-top: 3mm; \}/, '3 mm from the sender box to the recipient block');
+  assert.match(css, /\.label-area \{ position: relative; z-index: 1; background: #fff; \}/, 'white behind the label');
   assert.match(css, /\.sender b \{ font-size: 11pt; \}/);
   assert.match(css, /\.label \{[^}]*font-size: 13pt; \}/, 'the recipient block stays bigger');
   assert.match(css, /\.label \.name \{ font-size: 19pt;/);
@@ -213,12 +221,42 @@ test('print: the sender constants mirror data.js, and the spaced form is derived
   assert.match(fnSrc('orderPrintHtml'), /phoneDisplay\(SHOP_SENDER_PHONE\)/);
 });
 
-test('print: the page keeps its parts, in order — the sender box is the only addition', () => {
+test('print: the page keeps its parts, in order', () => {
   const html = orderPrintHtml(ORDER, ITEMS);
-  const parts = ['class="head"', 'class="meta"', '<h2>ارسال به</h2>', 'class="label"', 'class="sender"', 'class="notes"', 'class="cut"', '<h2>محتویات سفارش</h2>', '<table>', 'class="totals"', 'class="pay"', 'class="checks"', 'class="foot"'];
+  const parts = ['class="head"', 'class="meta"', 'class="block label-area"', 'class="sender"', '<h2>گیرنده</h2>', 'class="label"', 'class="notes"', 'class="cut"', 'class="slip"', 'class="watermark"', '<h2>محتویات سفارش</h2>', '<table>', 'class="totals"', 'class="pay"', 'class="checks"', 'class="foot"'];
   const at = parts.map((p) => html.indexOf(p));
   assert.ok(at.every((i, k) => i > 0 && (k === 0 || i > at[k - 1])), 'order: ' + at);
   for (const p of parts) assert.equal(html.split(p).length, 2, 'once: ' + p);
+});
+
+test('print: the flower watermark — the storefront\'s motif, absolute URL on the origin, faint, forced to print, outside the label', () => {
+  const html = orderPrintHtml(ORDER, ITEMS, 'https://glow-home.ir');
+  assert.ok(html.includes('<img class="watermark" src="https://glow-home.ir/images/motif-flower.png" alt="" aria-hidden="true">'));
+  assert.ok(orderPrintHtml(ORDER, ITEMS).includes('src="/images/motif-flower.png"'), 'root-relative without an origin');
+  const rule = html.match(/\.watermark \{([^}]*)\}/)[1];
+  assert.match(rule, /-webkit-print-color-adjust: exact; print-color-adjust: exact;/);
+  assert.match(rule, /opacity: 0\.3;/, 'the motif PNG is itself ~42% opaque: 0.3 ≈ 0.12 on solid lines');
+  assert.match(rule, /filter: grayscale\(1\);/);
+  assert.match(rule, /position: absolute; z-index: 0;/);
+  assert.match(html, /\.slip \{ position: relative; overflow: hidden; overflow: clip; \}/, 'clipped by the slip: it can never add a page');
+  assert.match(html, /\.slip > \*:not\(\.watermark\) \{ position: relative; z-index: 1; \}/, 'the slip text sits above it');
+  // inside the slip (after the ✂ line), never inside the label area
+  const label = html.slice(html.indexOf('<div class="block label-area">'), html.indexOf('<div class="cut"'));
+  assert.ok(!label.includes('watermark') && !label.includes('motif-flower'));
+  assert.ok(html.indexOf('<div class="slip">') < html.indexOf('class="watermark"'));
+  assert.doesNotMatch(html, /background(-image)?:\s*url\(/, 'not a CSS background');
+  assert.ok(readFileSync(new URL('../../images/motif-flower.png', import.meta.url)).length < 400 * 1024, 'a small file');
+});
+
+test('print: waits for the font and the watermark, at most PRINT_WAIT_MS; a failed image is removed', () => {
+  const print = fnSrc('printOrder');
+  assert.match(adminJs, /\nconst PRINT_WAIT_MS = 3000;\n/);
+  assert.match(print, /win\.document\.fonts && win\.document\.fonts\.ready/);
+  assert.match(print, /querySelector\('\.watermark'\)/);
+  assert.match(print, /img\.addEventListener\('load', resolve\)/);
+  assert.match(print, /img\.addEventListener\('error', \(\) => \{\s*img\.remove\(\);\s*resolve\(\);/);
+  assert.match(print, /setTimeout\(resolve, PRINT_WAIT_MS\)/);
+  assert.match(print, /Promise\.race\(\[Promise\.all\(\[fonts, image\]\), timeout\]\)\.then\(\(\) => setTimeout\(print, 100\)\)/);
 });
 
 test('print: unpaid or failed online orders say «پرداخت‌نشده», never «پرداخت‌شده», and show no tracking code', () => {

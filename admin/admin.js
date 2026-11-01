@@ -1261,6 +1261,9 @@ function orderPrintHtml(o, items, origin = '') {
   const method = SHIPPING_LABEL[o.shipping_method] || o.shipping_method || '—';
   const ltr = (s) => `<span class="ltr">${escapeHtml(s)}</span>`;
   const font = (file) => escapeHtml(String(origin || '') + '/fonts/' + file);
+  // The storefront's line-art daffodil (images/motif-flower.png), reused as a
+  // faint watermark behind the packing slip — never behind the label.
+  const watermark = escapeHtml(String(origin || '') + '/images/motif-flower.png');
   return `<!doctype html>
 <html lang="fa" dir="rtl">
 <head>
@@ -1285,7 +1288,9 @@ function orderPrintHtml(o, items, origin = '') {
   .label .name { font-size: 19pt; font-weight: 700; line-height: 1.3; }
   .label .row { margin-top: 1mm; }
   .label .method { margin-top: 2mm; padding-top: 1.5mm; border-top: 1px solid #000; font-weight: 700; font-size: 14pt; }
-  .sender { border: 1.5px solid #000; padding: 1.5mm 4mm; margin-top: 3mm; font-size: 12pt; }
+  .label-area { position: relative; z-index: 1; background: #fff; }
+  .label-area h2 { margin-top: 3mm; }
+  .sender { border: 1.5px solid #000; padding: 1.5mm 4mm; font-size: 12pt; }
   .sender b { font-size: 11pt; }
   .notes { border: 1px solid #000; padding: 2.5mm 4mm; margin-top: 3mm; font-size: 11pt; white-space: pre-wrap; }
   .cut { margin: 4.5mm 0 4mm; border-top: 1.5px dashed #000; position: relative; height: 0; }
@@ -1305,6 +1310,19 @@ function orderPrintHtml(o, items, origin = '') {
   .box { display: inline-block; width: 5mm; height: 5mm; border: 1.5px solid #000; vertical-align: middle; margin-inline-start: 2mm; }
   .foot { margin-top: 4mm; padding-top: 2mm; border-top: 1px solid #000; display: flex; justify-content: space-between; font-size: 10pt; }
   .block, .totals, .checks, .foot { page-break-inside: avoid; break-inside: avoid; }
+  /* The watermark: behind the items, totals and footer, bleeding off the
+     bottom-left corner; faint and grey so it never gets in the way of the
+     text, and forced to print (browsers drop images styled as
+     backgrounds). The slip clips it, so it can never add a page. */
+  .slip { position: relative; overflow: hidden; overflow: clip; }
+  .slip > *:not(.watermark) { position: relative; z-index: 1; }
+  .watermark {
+    position: absolute; z-index: 0; bottom: -14mm; inset-inline-end: -20mm; width: 120mm; height: auto;
+    /* motif-flower.png's lines are themselves only ~42% opaque, so 0.3 here
+       prints them like solid lines at ~0.12: faint, never in the way. */
+    opacity: 0.3; filter: grayscale(1); pointer-events: none;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
   .screen-only { margin: 12px auto; max-width: 186mm; text-align: center; font-family: inherit; }
   .screen-only button { font: inherit; padding: 8px 22px; border: 1px solid #000; background: #fff; cursor: pointer; }
   @media print { .screen-only { display: none; } }
@@ -1316,8 +1334,9 @@ function orderPrintHtml(o, items, origin = '') {
   <div class="head"><span class="brand ltr">Glow Home</span><span class="doc">برگه سفارش</span></div>
   <div class="meta"><span class="code ltr">${escapeHtml(o.code)}</span><span>${escapeHtml(date)}</span></div>
 
-  <div class="block">
-    <h2>ارسال به</h2>
+  <div class="block label-area">
+    <div class="sender"><b>فرستنده:</b> ${escapeHtml(SHOP_SENDER_NAME)} — ${ltr(phoneDisplay(SHOP_SENDER_PHONE))}</div>
+    <h2>گیرنده</h2>
     <div class="label">
       <div class="name">${escapeHtml(o.customer_name || '')}</div>
       <div class="row">موبایل: ${ltr(o.phone || '')}</div>
@@ -1326,12 +1345,13 @@ function orderPrintHtml(o, items, origin = '') {
       ${o.postcode ? `<div class="row">کد پستی: ${ltr(o.postcode)}</div>` : ''}
       <div class="method">روش ارسال: ${escapeHtml(method)}</div>
     </div>
-    <div class="sender"><b>فرستنده:</b> ${escapeHtml(SHOP_SENDER_NAME)} — ${ltr(phoneDisplay(SHOP_SENDER_PHONE))}</div>
     ${o.note ? `<div class="notes"><b>توضیحات مشتری:</b> ${escapeHtml(o.note)}</div>` : ''}
   </div>
 
   <div class="cut" aria-hidden="true"><span>✂</span></div>
 
+  <div class="slip">
+  <img class="watermark" src="${watermark}" alt="" aria-hidden="true">
   <h2>محتویات سفارش</h2>
   <table>
     <thead><tr><th class="n">ردیف</th><th>نام محصول</th><th class="n">تعداد</th><th class="num">قیمت واحد</th><th class="num">جمع</th></tr></thead>
@@ -1355,10 +1375,13 @@ function orderPrintHtml(o, items, origin = '') {
   <div class="checks"><span>بسته‌بندی شد<span class="box"></span></span><span>ارسال شد<span class="box"></span></span></div>
 
   <div class="foot"><span>از خرید شما سپاسگزاریم</span><span class="ltr">glow-home.ir · Instagram: @${escapeHtml(SHOP_INSTAGRAM)}</span></div>
+  </div>
 </div>
 </body>
 </html>`;
 }
+
+const PRINT_WAIT_MS = 3000;
 
 // A new window rather than a hidden iframe: Safari (iPhone/Mac) prints the
 // parent page instead of a hidden iframe. Opened in the click itself, so
@@ -1379,8 +1402,21 @@ function printOrder(id) {
     win.print();
   };
   win.document.getElementById('print-again').addEventListener('click', print);
-  const fonts = win.document.fonts && win.document.fonts.ready;
-  (fonts || Promise.resolve()).then(() => setTimeout(print, 100));
+  // Wait for the font and the watermark image — but never more than
+  // PRINT_WAIT_MS: if either fails or hangs, print anyway (a watermark that
+  // didn't load is removed; the page is fine without it).
+  const fonts = (win.document.fonts && win.document.fonts.ready) || Promise.resolve();
+  const img = win.document.querySelector('.watermark');
+  const image = new Promise((resolve) => {
+    if (!img || (img.complete && img.naturalWidth)) return resolve();
+    img.addEventListener('load', resolve);
+    img.addEventListener('error', () => {
+      img.remove();
+      resolve();
+    });
+  });
+  const timeout = new Promise((resolve) => setTimeout(resolve, PRINT_WAIT_MS));
+  Promise.race([Promise.all([fonts, image]), timeout]).then(() => setTimeout(print, 100));
 }
 
 async function updateOrderStatus(id, status) {
