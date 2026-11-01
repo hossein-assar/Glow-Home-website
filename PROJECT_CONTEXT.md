@@ -302,9 +302,13 @@ the base size. The storefront drops any cart line it can't price —
     shaped exactly like the photo (`aspect-ratio: var(--w) / var(--h)`
     from the real size, which is also the `<img>`'s width/height), at most
     `min(560px, 65vh)` tall, centred, with the photo `width: 100%; height:
-    auto` — no cropping, no blur layer, no strips. The title and subtitle
-    stay on the photo at the bottom over the gradient (slimmer padding on
-    phones). For another real landscape photo, set the same four keys.
+    auto` — no cropping, no blur layer, no strips. Above 760 px the title
+    and subtitle sit on the photo at the bottom over the gradient; at
+    760 px and below they go under the photo in page colours (title
+    `--color-text`, subtitle `--color-neutral-700`), so nothing covers the
+    photo, and the rounded corners move to the photo itself. The usual
+    30 px banner margin follows the caption, as on the other category
+    pages. For another real landscape photo, set the same four keys.
   `banner-lamps.jpg` is also the photo on the «درباره ما» page (cropped to
   4:5 portrait there with `object-fit: cover`), so replacing it changes
   both, and `bannerWidth`/`bannerHeight` must be updated to its new size.

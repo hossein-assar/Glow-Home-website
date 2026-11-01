@@ -1267,11 +1267,12 @@ function screenShop() {
 
 /** A category's banner. bannerFit: 'whole' (a landscape photo with its
  * bannerWidth/bannerHeight): a box shaped exactly like the photo, shown
- * whole. Otherwise the blur-fill: the (portrait) photo sharp and contained,
- * over a blurred copy of itself. */
+ * whole, with the caption on it (under it on phones). Otherwise the
+ * blur-fill: the (portrait) photo sharp and contained, over a blurred copy
+ * of itself. */
 function collectionBannerHtml(c, cover) {
   const copy = `<div class="banner-copy">
-        <h1 class="page-title" style="color:#fff">${esc(c.fa)}</h1>
+        <h1 class="page-title banner-title">${esc(c.fa)}</h1>
         <p>${c.blurb}</p>
       </div>`;
   if (c.bannerFit === 'whole' && c.bannerImg && c.bannerWidth && c.bannerHeight) {

@@ -1091,6 +1091,7 @@ button.media.gallery-cover {
   background: linear-gradient(to top, rgba(22, 21, 20, 0.82), rgba(22, 21, 20, 0));
   color: #fff;
 }
+.banner-copy .banner-title { color: #fff; }
 .banner-copy p { color: var(--color-neutral-300); max-width: 56ch; margin-top: 6px; }
 
 /* bannerFit: 'whole' (data.js) — a landscape banner photo shown whole: the
@@ -1632,9 +1633,15 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
   .cart-row-end { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; }
 
   .banner { min-height: 180px; }
-  /* The whole-photo banner is only ~236 px tall here: a slimmer caption
-     leaves more of the photo clear. */
-  .banner--whole .banner-copy { padding: 16px; }
+  /* The whole-photo banner is only ~236 px tall here, so the caption goes
+     under the photo, in page colours, and nothing covers the photo. The
+     rounded corners move to the photo, which keeps its own ratio; the 30 px
+     below the caption is the banner's usual margin-bottom. */
+  .banner.banner--whole { aspect-ratio: auto; border-radius: 0; overflow: visible; }
+  .banner--whole .banner-photo { border-radius: var(--radius-lg); }
+  .banner--whole .banner-copy { position: static; padding: 16px 0 0; background: none; }
+  .banner--whole .banner-copy .banner-title { color: var(--color-text); }
+  .banner--whole .banner-copy p { color: var(--color-neutral-700); }
 
   /* Sticky action bar for product / cart / checkout */
   .action-bar {
