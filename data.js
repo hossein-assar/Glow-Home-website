@@ -70,6 +70,11 @@ const COLLECTIONS = {
     blurb: 'با نور گرم و طراحی چشم‌نواز، فضای خانه را دنج‌تر و دلنشین‌تر کنید.',
     cover: 'deforme-tall',
     bannerImg: 'images/banner-lamps.jpg',
+    // A landscape photo: shown whole in a box of its own shape (its real
+    // size below) instead of the blur-fill the portrait banners use.
+    bannerFit: 'whole',
+    bannerWidth: 1600,
+    bannerHeight: 1067,
   },
   candles: {
     fa: 'شمع',

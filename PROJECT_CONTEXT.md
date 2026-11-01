@@ -291,34 +291,40 @@ the base size. The storefront drops any cart line it can't price —
   24-hour cache and caused repeated "I updated the photo and it's not
   showing" confusion. Don't re-add long-lived image caching without a
   cache-busting filename strategy.
-- **Category banners**: `screenCollection()` in app.js renders every banner
-  photo via a blur-fill technique (`.banner-photo-bg` blurred/cropped behind,
-  `.banner-photo-fg` sharp/`contain` on top) rather than a plain
-  `object-fit: cover`, because every product photo in the catalog is
-  portrait-oriented and cropped badly at the banner's ~3:1 aspect ratio.
-  آباژور's banner uses a dedicated wide lifestyle photo
-  (`images/banner-lamps.jpg`) through the same mechanism. If you get a real
-  wide "lineup" photo for another category, wire it the same way via
-  `COLLECTIONS.<key>.bannerImg` in data.js. `banner-lamps.jpg` is also the
-  photo on the «درباره ما» page (cropped to portrait there), so replacing
-  it changes both.
+- **Category banners**: `collectionBannerHtml()` in app.js (called from
+  `screenCollection()`) has two kinds:
+  - **Blur-fill** (the default — شید, شمع, اکسسوری): `.banner-photo-bg`
+    blurred/cropped behind, `.banner-photo-fg` sharp/`contain` on top, in
+    the ~3:1 banner, because those photos are portrait and a plain
+    `object-fit: cover` crops them badly.
+  - **Whole photo** (`bannerFit: 'whole'` plus `bannerImg`, `bannerWidth`,
+    `bannerHeight` in `COLLECTIONS.<key>` — only آباژور): a rounded box
+    shaped exactly like the photo (`aspect-ratio: var(--w) / var(--h)`
+    from the real size, which is also the `<img>`'s width/height), at most
+    `min(560px, 65vh)` tall, centred, with the photo `width: 100%; height:
+    auto` — no cropping, no blur layer, no strips. The title and subtitle
+    stay on the photo at the bottom over the gradient (slimmer padding on
+    phones). For another real landscape photo, set the same four keys.
+  `banner-lamps.jpg` is also the photo on the «درباره ما» page (cropped to
+  4:5 portrait there with `object-fit: cover`), so replacing it changes
+  both, and `bannerWidth`/`bannerHeight` must be updated to its new size.
 - **Home hero / banner photos** (replaced 2026-11-01): `images/hero.jpg`
   (rope-shade lamp on a wooden stool beside a plant, 1620×1080) and
   `images/banner-lamps.jpg` (lilac lamp on a wooden desk, 1600×1067). Both
   were prepared like every site photo: EXIF orientation applied, all
   EXIF/GPS/XMP removed, long side ≤ 2000 px (hero) / 1600 px (banner),
   JPEG quality 82, progressive — about 150 KB / 125 KB.
-  The hero is **never cropped**: the `<img>` has `width="1620"
-  height="1080"` and `width: 100%; height: auto`, so the hero takes the
-  photo's own 3:2 ratio (no fixed height, no `object-fit`/`object-position`,
-  no blur fill). It is capped at 1440 px wide (≤ 960 px tall), centred,
-  with the page background beside it on wider screens. Above 1000 px the
-  headline card is overlaid on the left (inline end,
-  `margin-inline-start: auto`), vertically centred, over the plant so the
-  lamp stays visible; at 1000 px and below the text goes under the photo.
-  A new hero photo needs its `width`/`height` attributes in `home()`
-  updated, and the card position looked at again if its subject is
-  elsewhere. `og:image` in index.html is the absolute
+  The hero photo is **never cropped**: it sits in a rounded box
+  (`.hero-photo`) inside the content width, shaped exactly like the photo
+  (`--w: 1620; --h: 1080` and the `<img>`'s `width`/`height`), at most
+  `min(640px, 72vh)` tall — no `object-fit`, no blur, not full-bleed. Above
+  1000 px the headline and buttons are a 360 px column beside the photo
+  (photo on the left, text on the right in RTL, centred together), so the
+  text never covers the lamp; at 1000 px and below the photo takes the
+  full content width and the text goes under it. A new hero photo needs
+  `--w`/`--h` and `width`/`height` in `screenHome()` set to its real size
+  (`payment-server/test/photo-boxes.test.js` checks both photos against
+  the JPEG files). `og:image` in index.html is the absolute
   `https://glow-home.ir/images/hero.jpg` (link previews ignore relative
   URLs).
 - **Persian/Arabic-digit handling is inconsistent on purpose**: کد پستی

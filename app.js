@@ -1078,16 +1078,16 @@ function screenHome() {
   ITEMS.forEach((p) => counts[p.col]++);
 
   return `
-  <section class="hero">
-    <img class="hero-bg" src="images/hero.jpg" width="1620" height="1080" alt="آباژور سفالی با شید طنابی کرم روی چهارپایه‌ی چوبی، کنار گلدان گیاه">
-    <div class="shell hero-inner">
-      <div class="hero-copy">
-        <h1>${esc(COPY.heroTitle)}</h1>
-        <p class="lead">${COPY.heroBody}</p>
-        <div class="hero-actions">
-          <button class="btn btn-accent" data-nav="#/shop">دیدن همه‌ی محصولات</button>
-          <button class="btn btn-ghost" data-nav="#/c/lamps">${esc(COLLECTIONS.lamps.fa)}</button>
-        </div>
+  <section class="shell hero">
+    <div class="hero-photo" style="--w: 1620; --h: 1080">
+      <img class="hero-bg" src="images/hero.jpg" width="1620" height="1080" alt="آباژور سفالی با شید طنابی کرم روی چهارپایه‌ی چوبی، کنار گلدان گیاه">
+    </div>
+    <div class="hero-copy">
+      <h1>${esc(COPY.heroTitle)}</h1>
+      <p class="lead">${COPY.heroBody}</p>
+      <div class="hero-actions">
+        <button class="btn btn-accent" data-nav="#/shop">دیدن همه‌ی محصولات</button>
+        <button class="btn btn-ghost" data-nav="#/c/lamps">${esc(COLLECTIONS.lamps.fa)}</button>
       </div>
     </div>
   </section>
@@ -1265,6 +1265,31 @@ function screenShop() {
   </div>`;
 }
 
+/** A category's banner. bannerFit: 'whole' (a landscape photo with its
+ * bannerWidth/bannerHeight): a box shaped exactly like the photo, shown
+ * whole. Otherwise the blur-fill: the (portrait) photo sharp and contained,
+ * over a blurred copy of itself. */
+function collectionBannerHtml(c, cover) {
+  const copy = `<div class="banner-copy">
+        <h1 class="page-title" style="color:#fff">${esc(c.fa)}</h1>
+        <p>${c.blurb}</p>
+      </div>`;
+  if (c.bannerFit === 'whole' && c.bannerImg && c.bannerWidth && c.bannerHeight) {
+    return `<div class="banner banner--whole" style="--w: ${+c.bannerWidth}; --h: ${+c.bannerHeight}">
+      <img class="banner-photo" src="${esc(c.bannerImg)}" width="${+c.bannerWidth}" height="${+c.bannerHeight}" alt="${esc(c.fa)}">
+      ${copy}
+    </div>`;
+  }
+  const bannerSrc = c.bannerImg || (cover && cover.img);
+  return `<div class="banner">
+      <div class="banner-photo-fill">
+        <img class="banner-photo-bg" src="${esc(bannerSrc)}" alt="">
+        <img class="banner-photo-fg" src="${esc(bannerSrc)}" alt="${esc(c.fa)}">
+      </div>
+      ${copy}
+    </div>`;
+}
+
 function screenCollection() {
   const key = COLLECTIONS[state.filter] ? state.filter : 'lamps';
   const c = COLLECTIONS[key];
@@ -1279,19 +1304,7 @@ function screenCollection() {
   );
   return `
   <div class="shell screen">
-    <div class="banner">
-      ${(() => {
-        const bannerSrc = c.bannerImg || cover.img;
-        return `<div class="banner-photo-fill">
-               <img class="banner-photo-bg" src="${esc(bannerSrc)}" alt="">
-               <img class="banner-photo-fg" src="${esc(bannerSrc)}" alt="${esc(c.fa)}">
-             </div>`;
-      })()}
-      <div class="banner-copy">
-        <h1 class="page-title" style="color:#fff">${esc(c.fa)}</h1>
-        <p>${c.blurb}</p>
-      </div>
-    </div>
+    ${collectionBannerHtml(c, cover)}
     <div class="motif-anchor">
       <img class="page-motif" src="images/motif-flower.png" alt="">
       ${chipRow(subs, state.subFilter, 'subfilter')}

@@ -908,55 +908,47 @@ button.media.gallery-cover {
 .card .btn { margin-top: auto; }
 
 /* ---- Home / hero --------------------------------------------------------
-   Full-width banner: the whole photo, edge to edge and never cropped — the
-   box takes the image's own aspect ratio (width/height on the <img>), so
-   its height follows the screen width. The headline sits in a translucent
-   card on top, which keeps the text legible regardless of what part of the
-   photo lands behind it, without relying on a directional gradient (which
-   would need to flip for RTL). */
+   The photo in a rounded box shaped exactly like the photo (aspect-ratio
+   from --w / --h, the <img>'s own width/height), so it fills the box with
+   nothing cropped and no strips. The box is at most min(640px, 72vh) tall
+   and its width follows from the ratio. Above 1000 px the text is a column
+   beside the photo (on the right in RTL), so it never covers the lamp; at
+   1000 px and below it goes under the photo. */
 
-/* Capped at 1440 px (≤ 960 px tall) so the 1620 px photo is never
-   stretched far past its real size; wider screens show the page background
-   beside it. */
-.hero { position: relative; max-width: 1440px; margin-inline: auto; }
+.hero {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  justify-content: center;
+  gap: 48px;
+  padding-top: 32px;
+}
+.hero-photo {
+  flex: 0 1 auto;
+  min-width: 0;
+  width: calc(min(640px, 72vh) * var(--w) / var(--h));
+  aspect-ratio: var(--w) / var(--h);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--color-neutral-200);
+}
 .hero-bg {
   display: block;
   width: 100%;
   height: auto;
   filter: saturate(0.92);
 }
-.hero-inner {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  padding-block: 40px;
-}
-.hero-copy {
-  max-width: 460px;
-  /* On the left (inline end in RTL), over the plant, so the lamp on the
-     right of centre stays clear. On phones the text sits under the photo. */
-  margin-inline-start: auto;
-  background: rgba(22, 20, 18, 0.6);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
-  color: #fff;
-  padding: 30px 28px;
-  border-radius: var(--radius-lg);
-}
+.hero-copy { flex: 0 0 360px; }
 .hero-copy h1 {
   font-family: var(--font-display);
   font-size: clamp(28px, 4.2vw, 44px);
   font-weight: 500;
   line-height: 1.32;
   letter-spacing: -0.015em;
-  color: #fff;
+  color: var(--color-text);
 }
-.hero-copy .lead { margin-top: 16px; max-width: 42ch; color: rgba(255, 255, 255, 0.86); }
+.hero-copy .lead { margin-top: 16px; max-width: 42ch; color: var(--color-neutral-700); }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
-.hero-copy .btn-ghost { color: #fff; border-color: rgba(255, 255, 255, 0.45); }
-.hero-copy .btn-ghost:hover { background: rgba(255, 255, 255, 0.12); }
 
 .assurances {
   display: grid;
@@ -1100,6 +1092,26 @@ button.media.gallery-cover {
   color: #fff;
 }
 .banner-copy p { color: var(--color-neutral-300); max-width: 56ch; margin-top: 6px; }
+
+/* bannerFit: 'whole' (data.js) — a landscape banner photo shown whole: the
+   box is shaped exactly like the photo (--w / --h, its width/height), at most
+   min(560px, 65vh) tall, centred; no blur layer, no cropping, no strips. The
+   title stays on the photo at the bottom over the gradient. */
+.banner.banner--whole {
+  display: block;
+  aspect-ratio: var(--w) / var(--h);
+  width: min(100%, calc(min(560px, 65vh) * var(--w) / var(--h)));
+  min-height: 0;
+  max-height: none;
+  margin-inline: auto;
+}
+.banner--whole .banner-photo {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: saturate(0.88);
+}
+.banner--whole .banner-copy { position: absolute; inset-inline: 0; bottom: 0; }
 
 /* ---- Product detail ----------------------------------------------------- */
 
@@ -1570,23 +1582,11 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
    ========================================================================== */
 
 @media (max-width: 1000px) {
-  /* Up to here the card would cover most of the photo (or the lamp), and
-     on phones it would outgrow it: the text goes under the photo instead,
-     so the photo stays fully visible and the text gets the room it needs. */
-  .hero-inner { position: static; display: block; padding-block: 22px 6px; }
-  .hero-copy {
-    max-width: none;
-    padding: 0;
-    background: none;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    color: var(--color-text);
-    border-radius: 0;
-  }
-  .hero-copy h1 { color: var(--color-text); }
-  .hero-copy .lead { color: var(--color-neutral-700); }
-  .hero-copy .btn-ghost { color: var(--color-text); border-color: var(--color-divider); }
-  .hero-copy .btn-ghost:hover { background: var(--color-surface); }
+  /* No room for a text column beside the photo: the photo takes the full
+     content width (ratio kept) and the text goes under it. */
+  .hero { flex-direction: column; align-items: stretch; gap: 22px; padding-top: 22px; }
+  .hero-photo { width: 100%; }
+  .hero-copy { flex: none; }
   .product { grid-template-columns: 1fr; gap: 26px; }
   .cart-layout, .checkout-layout { grid-template-columns: 1fr; gap: 26px; }
   .studio-strip { grid-template-columns: 1fr; }
@@ -1632,6 +1632,9 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
   .cart-row-end { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; }
 
   .banner { min-height: 180px; }
+  /* The whole-photo banner is only ~236 px tall here: a slimmer caption
+     leaves more of the photo clear. */
+  .banner--whole .banner-copy { padding: 16px; }
 
   /* Sticky action bar for product / cart / checkout */
   .action-bar {
