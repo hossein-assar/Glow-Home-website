@@ -1633,15 +1633,28 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
   .cart-row-end { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; }
 
   .banner { min-height: 180px; }
-  /* The whole-photo banner is only ~236 px tall here, so the caption goes
-     under the photo, in page colours, and nothing covers the photo. The
-     rounded corners move to the photo, which keeps its own ratio; the 30 px
-     below the caption is the banner's usual margin-bottom. */
-  .banner.banner--whole { aspect-ratio: auto; border-radius: 0; overflow: visible; }
-  .banner--whole .banner-photo { border-radius: var(--radius-lg); }
-  .banner--whole .banner-copy { position: static; padding: 16px 0 0; background: none; }
-  .banner--whole .banner-copy .banner-title { color: var(--color-text); }
-  .banner--whole .banner-copy p { color: var(--color-neutral-700); }
+  /* The whole-photo banner is only ~236 px tall here: a compact caption on
+     the photo (smaller type, subtitle at most two lines, small padding) over
+     a gradient that only covers the bottom and fades out above the title,
+     so it covers as little of the photo as possible. */
+  .banner--whole .banner-copy {
+    padding: 18px 12px 12px;
+    /* dark behind the text (the right side can be the bright curtain),
+       fading out only in the top padding */
+    background: linear-gradient(to top, rgba(22, 21, 20, 0.85) 0%, rgba(22, 21, 20, 0.72) 75%, rgba(22, 21, 20, 0) 100%);
+  }
+  .banner--whole .banner-copy .banner-title { font-size: 22px; line-height: 1.25; }
+  .banner--whole .banner-copy p {
+    font-size: 13px;
+    line-height: 1.5;
+    margin-top: 2px;
+    color: rgba(255, 255, 255, 0.9);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
 
   /* Sticky action bar for product / cart / checkout */
   .action-bar {

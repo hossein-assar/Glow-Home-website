@@ -110,22 +110,24 @@ test('the other categories keep the blur-fill (sharp contained photo over a blur
   assert.match(fnSrc('screenCollection'), /\$\{collectionBannerHtml\(c, cover\)\}/);
 });
 
-test('آباژور banner on phones (≤ 760 px): caption under the photo in page colours; on desktop on the photo', () => {
+test('آباژور banner on phones (≤ 760 px): a compact caption on the photo, white over a bottom-only gradient', () => {
   const phone = css.slice(css.indexOf('@media (max-width: 760px)'));
   const block = (sel) => {
     const m = phone.match(new RegExp(sel.replace(/[.()]/g, '\\$&') + ' \\{([^}]*)\\}'));
     assert.ok(m, 'phone rule: ' + sel);
     return m[1];
   };
-  assert.match(block('.banner.banner--whole'), /aspect-ratio: auto;.*overflow: visible;/, 'the box grows to hold photo + caption');
-  assert.match(block('.banner--whole .banner-photo'), /border-radius: var\(--radius-lg\);/, 'the photo keeps the rounded corners');
-  assert.match(block('.banner--whole .banner-copy'), /position: static;.*background: none;/, 'caption under the photo, no gradient');
-  assert.match(block('.banner--whole .banner-copy .banner-title'), /color: var\(--color-text\);/);
-  assert.match(block('.banner--whole .banner-copy p'), /color: var\(--color-neutral-700\);/);
-  // desktop: the caption is on the photo, white over the gradient
+  const copy = block('.banner--whole .banner-copy');
+  assert.match(copy, /padding: 18px 12px 12px;/);
+  assert.match(copy, /background: linear-gradient\(to top, rgba\(22, 21, 20, 0\.85\) 0%, rgba\(22, 21, 20, 0\.72\) 75%, rgba\(22, 21, 20, 0\) 100%\);/, 'dark behind the text, fading out only at the top');
+  assert.match(block('.banner--whole .banner-copy .banner-title'), /font-size: 22px;/);
+  const sub = block('.banner--whole .banner-copy p');
+  assert.match(sub, /font-size: 13px;/);
+  assert.match(sub, /-webkit-line-clamp: 2;/, 'subtitle at most two lines');
+  assert.match(sub, /color: rgba\(255, 255, 255, 0\.9\);/);
+  // still on the photo: nothing moves it out, the box keeps its shape and corners
+  assert.doesNotMatch(phone, /\.banner--whole[^{]*\{[^}]*(position: static|aspect-ratio: auto|overflow: visible|background: none)/);
   assert.match(rulesFor('.banner--whole .banner-copy'), /position: absolute; inset-inline: 0; bottom: 0;/);
   assert.match(css, /\.banner-copy \.banner-title \{ color: #fff; \}/);
-  // only the whole-photo banner moves its caption; the 30 px below it is the banner's own margin
-  assert.doesNotMatch(phone.slice(0, phone.indexOf('}\n}')), /\.banner \.banner-copy|^\s*\.banner-copy\b/m);
-  assert.match(rulesFor('.banner {').concat(css.match(/\n\.banner \{[^}]*\}/)[0]), /margin-bottom: 30px;/);
+  assert.match(css.match(/\n\.banner \{[^}]*\}/)[0], /border-radius: var\(--radius-lg\);[\s\S]*overflow: hidden;/);
 });
