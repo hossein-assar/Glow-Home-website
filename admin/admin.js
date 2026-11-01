@@ -978,9 +978,11 @@ const UNPAID_ONLINE = new Set(['pending_payment', 'payment_failed']);
 
 // Mirrors data.js/api/orders.js's SHIPPING — kept in sync by hand, same
 // reasoning as elsewhere in this project (no shared module between the
-// storefront and this panel). Only label + payAtDoor are needed here.
+// storefront and this panel). Only the label is needed here.
 const SHIPPING_LABEL = { peyk: 'پیک تهران', tipax: 'تیپاکس' };
-const SHIPPING_PAY_AT_DOOR = { peyk: true, tipax: true };
+// Mirrors data.js COPY.instagram (the printed order's footer); a test keeps
+// them equal. data.js isn't loaded here: its globals would clash.
+const SHOP_INSTAGRAM = 'glow.home__';
 
 let ORDERS_CACHE = [];
 let ORDER_ITEMS_BY_ORDER = {};
@@ -1057,6 +1059,8 @@ function renderOrdersList() {
   orders.forEach((o) => {
     const sel = document.getElementById(`order-status-${o.id}`);
     if (sel) sel.addEventListener('change', () => updateOrderStatus(o.id, sel.value));
+    const print = document.getElementById(`order-print-${o.id}`);
+    if (print) print.addEventListener('click', () => printOrder(o.id));
   });
 }
 
@@ -1077,7 +1081,7 @@ async function loadOrdersSummary() {
 
   const { data: allOrders, error: ordersErr } = await sb
     .from('orders')
-    .select('total, status, shipping_method, shipping_cost')
+    .select('total, status')
     .limit(1000);
 
   if (ordersErr || !allOrders) {
@@ -1089,16 +1093,6 @@ async function loadOrdersSummary() {
   const revenue = counted.reduce((sum, o) => sum + (o.total || 0), 0);
   const count = counted.length;
   const avg = count ? revenue / count : 0;
-
-  // پس‌کرایه (COD) shipping fees the courier collects directly — never
-  // part of `total`/revenue/AOV above (see the shipping_cost comment in
-  // api/orders.js), so this is purely informational, shown alongside the
-  // note below rather than folded into "درآمد کل". تیپاکس's own fee isn't
-  // a known amount (its shipping_cost is always 0), so it naturally
-  // contributes nothing here regardless.
-  const codShippingTotal = counted
-    .filter((o) => SHIPPING_PAY_AT_DOOR[o.shipping_method])
-    .reduce((sum, o) => sum + (o.shipping_cost || 0), 0);
 
   // Best-sellers by quantity, excluding cancelled orders — same exclusion
   // as revenue/count above, for consistency. order_items has no status of
@@ -1151,7 +1145,6 @@ async function loadOrdersSummary() {
     </div>
     <div style="margin-top:10px; font-size:12.5px; color:#8a7d6e">
       «درآمد کل» و «میانگین ارزش سفارش» شامل هزینه‌ی پس‌کرایه (مثلاً پیک تهران) نمی‌شود — این مبلغ را مشتری نقداً به مأمور تحویل می‌دهد، نه از طریق سایت.
-      ${codShippingTotal ? ` مجموع پس‌کرایه‌ی جمع‌آوری‌شده در همین بازه: ${money(codShippingTotal)}.` : ''}
     </div>`;
 }
 
@@ -1187,14 +1180,7 @@ function orderCardHtml(o, items) {
         <div class="order-item-row" style="font-weight:700; margin-top:6px; padding-top:6px; border-top:1px solid var(--divider)">
           <span>جمع کل</span><span>${money(o.total)}</span>
         </div>
-        <div style="margin-top:8px; color:#6b5f52">
-          روش ارسال: ${escapeHtml(SHIPPING_LABEL[o.shipping_method] || o.shipping_method || '—')}
-          ${
-            SHIPPING_PAY_AT_DOOR[o.shipping_method] && o.shipping_cost > 0
-              ? ` — ${money(o.shipping_cost)} (پس‌کرایه، جدا از مبلغ سفارش)`
-              : ''
-          }
-        </div>
+        <div style="margin-top:8px; color:#6b5f52">روش ارسال: ${escapeHtml(SHIPPING_LABEL[o.shipping_method] || o.shipping_method || '—')}</div>
         ${o.note ? `<div style="margin-top:8px; color:#6b5f52">یادداشت: ${escapeHtml(o.note)}</div>` : ''}
         ${o.payment_method === 'zarinpal' ? paymentInfoHtml(o) : ''}
       </div>
@@ -1205,6 +1191,7 @@ function orderCardHtml(o, items) {
             .map((k) => `<option value="${k}" ${o.status === k ? 'selected' : ''}>${STATUS_LABEL[k]}</option>`)
             .join('')}
         </select>
+        <button type="button" class="btn ghost" id="order-print-${o.id}" style="padding:6px 14px; margin-inline-start:8px">چاپ سفارش</button>
       </div>
     </div>`;
 }
@@ -1217,6 +1204,169 @@ function paymentInfoHtml(o) {
   if (o.payment_card_pan) parts.push('کارت: <span style="direction:ltr;unicode-bidi:embed">' + escapeHtml(o.payment_card_pan) + '</span>');
   if (!o.paid_at && o.payment_error) parts.push('خطا: ' + escapeHtml(o.payment_error));
   return `<div style="margin-top:8px; color:#6b5f52">${parts.join(' — ')}</div>`;
+}
+
+/* ---- Printable order ------------------------------------------------------
+   «چاپ سفارش» opens one order as an A4 page and starts the print dialog:
+   a shipping label to cut out (name, mobile, address, method) and a packing
+   slip (items, fees, total, payment). Built from the order already loaded
+   here — no request. Every value from the order is escaped. Never printed:
+   the card number, and any phone number of the shop (it shows none). */
+
+// Paid or not, for the slip. Online orders: paid once verified (paid_at or
+// a tracking code) and not in an unpaid-online status. Older orders without
+// online payment: paid once marked paid or further along.
+function orderPaymentState(o) {
+  const online = o.payment_method === 'zarinpal';
+  const paid = online
+    ? !UNPAID_ONLINE.has(o.status) && Boolean(o.paid_at || o.payment_ref_id)
+    : ['paid', 'preparing', 'shipped', 'delivered'].includes(o.status);
+  return {
+    paid,
+    label: `${online ? 'پرداخت آنلاین' : 'کارت به کارت'} — ${paid ? 'پرداخت‌شده' : 'پرداخت‌نشده'}`,
+    refId: online && paid ? o.payment_ref_id || '' : '',
+  };
+}
+
+function faNum(n) {
+  return Number(n || 0).toLocaleString('fa-IR');
+}
+
+// `origin` (location.origin) makes the font URLs absolute: the print window
+// starts as about:blank, where a root-relative URL may not resolve.
+function orderPrintHtml(o, items, origin = '') {
+  const products = items.filter((it) => it.product_id != null);
+  const fees = items.filter((it) => it.product_id == null);
+  const itemsSum = products.reduce((sum, it) => sum + it.unit_price * it.qty, 0);
+  const feesSum = fees.reduce((sum, it) => sum + it.unit_price * it.qty, 0);
+  const discount = Math.max(0, itemsSum + feesSum - (o.total || 0));
+  const pay = orderPaymentState(o);
+  const when = o.created_at ? new Date(o.created_at) : null;
+  const date = when
+    ? when.toLocaleDateString('fa-IR', { year: 'numeric', month: '2-digit', day: '2-digit' }) +
+      '، ساعت ' +
+      when.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
+    : '';
+  const method = SHIPPING_LABEL[o.shipping_method] || o.shipping_method || '—';
+  const ltr = (s) => `<span class="ltr">${escapeHtml(s)}</span>`;
+  const font = (file) => escapeHtml(String(origin || '') + '/fonts/' + file);
+  return `<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>سفارش ${escapeHtml(o.code)}</title>
+<style>
+  @font-face { font-family: 'IRANSansX'; src: url('${font('iransansx-400.woff2')}') format('woff2'); font-weight: 400; }
+  @font-face { font-family: 'IRANSansX'; src: url('${font('iransansx-700.woff2')}') format('woff2'); font-weight: 700; }
+  @page { size: A4 portrait; margin: 10mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #fff; color: #000; }
+  body { font-family: 'IRANSansX', Tahoma, sans-serif; font-size: 11pt; line-height: 1.6; }
+  .page { max-width: 186mm; margin: 0 auto; }
+  .ltr { direction: ltr; unicode-bidi: isolate; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #000; padding-bottom: 2mm; }
+  .brand { font-size: 16pt; font-weight: 700; }
+  .doc { font-size: 13pt; font-weight: 700; }
+  .meta { display: flex; justify-content: space-between; align-items: baseline; margin: 2mm 0 3mm; }
+  .code { font-size: 22pt; font-weight: 700; letter-spacing: 0.5px; }
+  h2 { font-size: 11pt; margin: 0 0 1.5mm; }
+  .label { border: 2px solid #000; padding: 3mm 4mm; font-size: 13pt; }
+  .label .name { font-size: 19pt; font-weight: 700; line-height: 1.3; }
+  .label .row { margin-top: 1mm; }
+  .label .method { margin-top: 2mm; padding-top: 1.5mm; border-top: 1px solid #000; font-weight: 700; font-size: 14pt; }
+  .notes { border: 1px solid #000; padding: 2.5mm 4mm; margin-top: 3mm; font-size: 11pt; white-space: pre-wrap; }
+  .cut { margin: 4.5mm 0 4mm; border-top: 1.5px dashed #000; position: relative; height: 0; }
+  .cut span { position: absolute; top: -9pt; inset-inline-start: 4mm; background: #fff; padding: 0 2mm; font-size: 12pt; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5pt; }
+  th, td { border: 1px solid #000; padding: 1.1mm 2mm; text-align: start; vertical-align: top; }
+  th { font-weight: 700; }
+  td.n, th.n { text-align: center; width: 10mm; }
+  td.num, th.num { text-align: left; white-space: nowrap; }
+  tr { page-break-inside: avoid; break-inside: avoid; }
+  thead { display: table-header-group; }
+  .totals { margin-top: 2mm; margin-inline-start: auto; width: 82mm; font-size: 11pt; }
+  .totals div { display: flex; justify-content: space-between; padding: 0.8mm 0; }
+  .totals .grand { border-top: 2px solid #000; margin-top: 1mm; padding-top: 1.6mm; font-weight: 700; font-size: 13pt; }
+  .pay { margin-top: 2mm; font-weight: 700; }
+  .checks { margin-top: 4mm; display: flex; gap: 12mm; font-size: 12pt; }
+  .box { display: inline-block; width: 5mm; height: 5mm; border: 1.5px solid #000; vertical-align: middle; margin-inline-start: 2mm; }
+  .foot { margin-top: 4mm; padding-top: 2mm; border-top: 1px solid #000; display: flex; justify-content: space-between; font-size: 10pt; }
+  .block, .totals, .checks, .foot { page-break-inside: avoid; break-inside: avoid; }
+  .screen-only { margin: 12px auto; max-width: 186mm; text-align: center; font-family: inherit; }
+  .screen-only button { font: inherit; padding: 8px 22px; border: 1px solid #000; background: #fff; cursor: pointer; }
+  @media print { .screen-only { display: none; } }
+</style>
+</head>
+<body>
+<div class="screen-only"><button type="button" id="print-again">چاپ دوباره</button></div>
+<div class="page">
+  <div class="head"><span class="brand ltr">Glow Home</span><span class="doc">برگه سفارش</span></div>
+  <div class="meta"><span class="code ltr">${escapeHtml(o.code)}</span><span>${escapeHtml(date)}</span></div>
+
+  <div class="block">
+    <h2>ارسال به</h2>
+    <div class="label">
+      <div class="name">${escapeHtml(o.customer_name || '')}</div>
+      <div class="row">موبایل: ${ltr(o.phone || '')}</div>
+      <div class="row">نشانی: ${escapeHtml(o.address || '')}</div>
+      <div class="row">شهر: ${escapeHtml(o.city || '')}</div>
+      ${o.postcode ? `<div class="row">کد پستی: ${ltr(o.postcode)}</div>` : ''}
+      <div class="method">روش ارسال: ${escapeHtml(method)}</div>
+    </div>
+    ${o.note ? `<div class="notes"><b>توضیحات مشتری:</b> ${escapeHtml(o.note)}</div>` : ''}
+  </div>
+
+  <div class="cut" aria-hidden="true"><span>✂</span></div>
+
+  <h2>محتویات سفارش</h2>
+  <table>
+    <thead><tr><th class="n">ردیف</th><th>نام محصول</th><th class="n">تعداد</th><th class="num">قیمت واحد</th><th class="num">جمع</th></tr></thead>
+    <tbody>
+      ${products
+        .map(
+          (it, i) =>
+            `<tr><td class="n">${faNum(i + 1)}</td><td>${escapeHtml(it.name_fa)}</td><td class="n">${faNum(it.qty)}</td><td class="num">${money(it.unit_price)}</td><td class="num">${money(it.unit_price * it.qty)}</td></tr>`
+        )
+        .join('')}
+    </tbody>
+  </table>
+  <div class="totals">
+    <div><span>جمع اقلام</span><span>${money(itemsSum)}</span></div>
+    ${fees.map((f) => `<div><span>${escapeHtml(f.name_fa)}</span><span>${money(f.unit_price * f.qty)}</span></div>`).join('')}
+    ${discount > 0 ? `<div><span>تخفیف${o.discount_code ? ` (${ltr(o.discount_code)})` : ''}</span><span>−${money(discount)}</span></div>` : ''}
+    <div class="grand"><span>${pay.paid ? 'مبلغ پرداخت‌شده' : 'مبلغ سفارش (پرداخت‌نشده)'}</span><span>${money(o.total)}</span></div>
+  </div>
+  <div class="pay">${pay.label}${pay.refId ? ` — کد پیگیری: ${ltr(pay.refId)}` : ''}</div>
+
+  <div class="checks"><span>بسته‌بندی شد<span class="box"></span></span><span>ارسال شد<span class="box"></span></span></div>
+
+  <div class="foot"><span>از خرید شما سپاسگزاریم</span><span class="ltr">glow-home.ir · Instagram: @${escapeHtml(SHOP_INSTAGRAM)}</span></div>
+</div>
+</body>
+</html>`;
+}
+
+// A new window rather than a hidden iframe: Safari (iPhone/Mac) prints the
+// parent page instead of a hidden iframe. Opened in the click itself, so
+// pop-up blockers allow it.
+function printOrder(id) {
+  const o = ORDERS_CACHE.find((x) => x.id === id);
+  if (!o) return;
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('پنجره‌ی چاپ باز نشد. لطفاً اجازه‌ی باز شدن پنجره (pop-up) را برای این سایت بدهید.');
+    return;
+  }
+  win.document.open();
+  win.document.write(orderPrintHtml(o, ORDER_ITEMS_BY_ORDER[o.id] || [], location.origin));
+  win.document.close();
+  const print = () => {
+    win.focus();
+    win.print();
+  };
+  win.document.getElementById('print-again').addEventListener('click', print);
+  const fonts = win.document.fonts && win.document.fonts.ready;
+  (fonts || Promise.resolve()).then(() => setTimeout(print, 100));
 }
 
 async function updateOrderStatus(id, status) {

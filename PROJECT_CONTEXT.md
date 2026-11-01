@@ -221,6 +221,26 @@ decisions from code alone — read this before making structural changes.
   code/customer_name/phone/city. The sales-summary stats above the orders
   list always reflect *all* orders regardless of the search box — they run
   their own separate, unfiltered query and never read the search term.
+  Courier fees (پس‌کرایه, paid to the courier at the door) appear nowhere in
+  the orders tab: an order card shows only «روش ارسال: پیک تهران / تیپاکس»,
+  and the summary note only says revenue excludes them. The packaging fee
+  outside Tehran is different — charged on the site, its own order line
+  (`product_id` null), part of `total`.
+- **Printable order** («چاپ سفارش» on each order card): `printOrder()` opens
+  a new window (not a hidden iframe — Safari prints the parent page instead)
+  and writes `orderPrintHtml(order, items, location.origin)` into it, built
+  only from the order already loaded in the panel (no request), then opens
+  the print dialog once IRANSansX has loaded. A4 portrait, black on white:
+  header (Glow Home / برگه سفارش, order code, date), a bordered «ارسال به»
+  shipping label (name, mobile, address, city, postcode, method) with any
+  customer note, a ✂ cut line, the items table with جمع اقلام / packaging
+  fee / discount / total, the payment line (online paid + کد پیگیری, or
+  «پرداخت‌نشده» for pending/failed online orders), two tick boxes
+  (بسته‌بندی شد / ارسال شد) and a footer with glow-home.ir and the Instagram
+  handle (`SHOP_INSTAGRAM`, mirrored from data.js; a test keeps them equal).
+  Every order value is escaped. Never printed: the card number and any shop
+  phone number. Up to ~8 items fit one page; rows don't split, longer
+  orders continue on a second page. Tests: `admin-orders.test.js`.
 
 ## Catalog data model (products table)
 
