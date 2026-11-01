@@ -1079,7 +1079,7 @@ function screenHome() {
 
   return `
   <section class="hero">
-    <img class="hero-bg" src="images/hero.jpg" alt="آباژور سفالی روشن روی میز کنار پنجره">
+    <img class="hero-bg" src="images/hero.jpg" alt="آباژور سفالی با شید طنابی کرم روی چهارپایه‌ی چوبی، کنار گلدان گیاه">
     <div class="shell hero-inner">
       <div class="hero-copy">
         <h1>${esc(COPY.heroTitle)}</h1>
@@ -1949,7 +1949,7 @@ function screenAbout() {
             .join('')}
         </div>
       </div>
-      <div class="media"><img src="images/banner-lamps.jpg" alt="مجموعه‌ای از آباژورهای دست‌ساز گلو هوم"></div>
+      <div class="media"><img src="images/banner-lamps.jpg" alt="آباژور سفالی یاسی با شید پارچه‌ای روی میز چوبی"></div>
     </div>
 
     <section class="block">
