@@ -41,6 +41,10 @@ test('the pattern catches the old number in every form it could be written', () 
     assert.match(form, OLD_RE, form);
   }
   for (const other of ['09121234567', '09195819204', '0919581920', '۰۹۱۲۱۲۳۴۵۶۷']) assert.doesNotMatch(other, OLD_RE, other);
+  // the shop's current WhatsApp number (data.js) doesn't trip it
+  const { COPY } = new Function(readFileSync(join(ROOT, 'data.js'), 'utf8') + '\nreturn { COPY };')();
+  assert.ok(COPY.contactWhatsapp);
+  assert.doesNotMatch(COPY.contactWhatsapp, OLD_RE);
 });
 
 test('the old number appears in no file of the repo, in any digit form', () => {

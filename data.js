@@ -286,7 +286,7 @@ const SHIPPING = [
 
 const PAYMENTS = [
   { id: 'gateway', label: 'درگاه پرداخت آنلاین', note: 'زرین‌پال / آیدی‌پی' },
-  { id: 'card', label: 'کارت به کارت', note: 'از طریق اینستاگرام یا فرم تماس پیام بدهید؛ سفارش در سایت ثبت نمی‌شود' },
+  { id: 'card', label: 'کارت به کارت', note: 'از طریق واتساپ، تلگرام یا اینستاگرام پیام بدهید؛ سفارش در سایت ثبت نمی‌شود' },
 ];
 
 // Online payment through ZarinPal (payment-server/, on the Iranian VPS) —
@@ -380,9 +380,12 @@ const COPY = {
   // no number on show; used for WhatsApp instead of contactPhone when set.
   // Any digits and spacing: '۰۹۱۲ ۳۴۵ ۶۷۸۹', '09123456789', '+98 912 …'.
   contactPhone: '',
-  contactWhatsapp: '',
+  contactWhatsapp: '+989353431782',
   instagram: 'glow.home__',
   instagramUrl: 'https://www.instagram.com/glow.home__?stkn=MXViNXFlZHN5aXAyNg==',
+  // Telegram (messages). Empty = every Telegram button and row hides.
+  telegram: 'glow_home_support',
+  telegramUrl: 'https://t.me/glow_home_support',
 
   footerBlurb: 'آباژور ها\nشمع های دست‌ساز\nشید های گلدوزی\nاکسسوری های منزل',
 };

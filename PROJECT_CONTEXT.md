@@ -28,50 +28,66 @@ decisions from code alone — read this before making structural changes.
 - **Card-to-card («کارت به کارت»)**: places no order, saves nothing, sends
   no email, and leaves the cart as it is. Choosing it at checkout replaces
   the order button with a calm box (`payByContactHtml()` in `app.js`):
-  «برای پرداخت کارت به کارت، لطفاً از طریق اینستاگرام یا فرم تماس به ما
-  پیام بدهید»,
-  «پیام در اینستاگرام» and «صفحه‌ی تماس با ما». On phones the sticky
-  action bar's button (`payByContactBarHtml()`) is «ارتباط برای پرداخت»
-  and opens Instagram. While `data.js` has a shop number (none for now —
-  see "Shop phone number" below) the box also gets an «ارسال پیام در
-  واتساپ» button first (Instagram then becomes the second, ghost button),
-  the bar becomes «پیام در واتساپ», and with `contactPhone` a «یا تماس
-  بگیرید: …» `tel:` line appears under the box. The WhatsApp link is
-  `https://wa.me/98…?text=…` (`whatsAppHref()`, `""` with no number), the
-  text `encodeURIComponent`-encoded — a greeting, each cart line (name,
-  size / shade / colour when chosen, quantity), the total in تومان, and
-  the city if typed; never the name, phone, address, postcode or note. The
-  city field updates the page without a re-render, so the link is rebuilt
-  the moment it is pressed or clicked (`refreshWhatsAppLink`) — still no
-  render and no request. The browser
+  «برای پرداخت کارت به کارت، لطفاً از طریق واتساپ، تلگرام یا اینستاگرام
+  به ما پیام بدهید», then, in this order, «ارسال پیام در واتساپ» (main
+  button, cart prefilled), «پیام در تلگرام», «پیام در اینستاگرام» and
+  «صفحه‌ی تماس با ما». WhatsApp and Telegram each show only while
+  `data.js` has them; the first button shown is the main (accent) one. On
+  phones the sticky action bar's button (`payByContactBarHtml()`) is «پیام
+  در واتساپ» with the same prefilled link, or «ارتباط برای پرداخت» opening
+  Instagram when there is no WhatsApp number. With `contactPhone` set (it
+  isn't) a «یا تماس بگیرید: …» `tel:` line would appear under the box. The
+  WhatsApp link is `https://wa.me/98…?text=…` (`whatsAppHref()`, `""` with
+  no number), the text `encodeURIComponent`-encoded — a greeting, each
+  cart line (name, size / shade / colour when chosen, quantity), the total
+  in تومان, and the city if typed; never the name, phone, address,
+  postcode or note. The city field updates the page without a re-render,
+  so the link is rebuilt the moment it is pressed or clicked
+  (`refreshWhatsAppLink`) — still no render and no request. The browser
   never sent a payment method, so `/api/orders` could not refuse only
   card-to-card orders; it refuses all of them instead.
-- **Shop phone number**: taken off the whole site (2026-10-31) because of
-  non-stop calls; customers reach the shop by Instagram and the contact
-  form only. Two constants in `COPY` (`data.js`), both `''` for now, and
-  no copy of a number anywhere else:
-  - `contactPhone` — calls (and WhatsApp): when set, the number row in
-    the footer and on the contact page, «یا تماس بگیرید» (`tel:`) and the
-    WhatsApp button/bar at checkout all come back by themselves.
-  - `contactWhatsapp` — a messages-only number: WhatsApp at checkout uses
-    it instead of `contactPhone`, and the footer and contact page get a
-    «پیام در واتساپ» link (`messageOnlyWhatsAppHref()`, plain `wa.me`)
-    with no digits on show and no `tel:` link.
-  Any digits/spacing work (`phoneIntl()`: Persian/Arabic → Latin,
-  non-digits dropped, leading 0 → 98); empty → every place hides, with no
-  empty row or stray icon. `payment-server/test/old-phone-number.test.js`
-  fails if the old number shows up in any file of the repo in any digit
-  form (it never spells the number out itself). The old number is still in
-  git history and was in earlier deploys; that can't be undone without
-  rewriting pushed history.
+- **Shop contact details** (all in `COPY`, `data.js`; no copy anywhere
+  else). The old call number was taken off the whole site (2026-10-31)
+  because of non-stop calls; since 2026-11-01 customers message the shop
+  on WhatsApp (messages only), Telegram or Instagram.
+  - `contactPhone` — calls: **empty, and must stay empty** for the
+    messages-only number. When set, the number row in the footer and on
+    the contact page, «یا تماس بگیرید» (`tel:`) and WhatsApp (if
+    `contactWhatsapp` is empty) come back by themselves.
+  - `contactWhatsapp` — the messages-only WhatsApp number (set). Checkout
+    WhatsApp uses it (before `contactPhone`), and the footer and contact
+    page show «پیام در واتساپ» (`messageOnlyWhatsAppHref()`, plain
+    `wa.me`) — never the digits, never a `tel:` link.
+  - `telegram` (handle, no `@`) and `telegramUrl` (`https://t.me/…`):
+    «پیام در تلگرام» at checkout, and «پیام در تلگرام» + `@handle` in the
+    footer and on the contact page (`telegramHref()`: the URL, else
+    `t.me/<handle>`; `telegramIcon()` is a filled inline SVG like
+    `whatsappIcon()`). Both empty → every Telegram button and row hides.
+  - `instagram` / `instagramUrl` — always shown.
+  Footer and contact-page order: WhatsApp, Telegram, Instagram, (phone),
+  hours; nothing empty leaves a row or icon behind. Numbers take any
+  digits/spacing (`phoneIntl()`: Persian/Arabic → Latin, non-digits
+  dropped, leading 0 → 98). Tests:
+  - `old-phone-number.test.js` fails if the old number shows up in any
+    file of the repo in any digit form (it never spells it out). It is
+    still in git history and earlier deploys; that can't be undone
+    without rewriting pushed history.
+  - `whatsapp-number.test.js` fails if the WhatsApp number (read from
+    `data.js`) is written anywhere but its `contactWhatsapp` line, in any
+    digit form; `card-to-card.test.js` checks it is never rendered as
+    digits or in a `tel:` link — only inside `wa.me` links.
   Nothing a customer sees says to call («تماس بگیرید») — it says «از طریق
-  اینستاگرام یا فرم تماس به ما پیام بدهید»: `CARD_TO_CARD_MSG`,
-  `ONLINE_OFF_MSG`, the failed-payment page, the tracking notice for a
-  failed payment, `RETIRED_ERROR` in `api/orders.js`, the card option's
-  note in `data.js`, and the payment server's "amount not allowed" error.
-  The one exception is the «یا تماس بگیرید» line, which shows only while
-  `contactPhone` is set; a test in `card-to-card.test.js` enforces this
-  (admin-only texts that point staff to the developer are left as they are).
+  واتساپ، تلگرام یا اینستاگرام به ما پیام بدهید» (WhatsApp first):
+  `CARD_TO_CARD_MSG`, `ONLINE_OFF_MSG`, the failed-payment page, the
+  tracking notice for a failed payment, `RETIRED_ERROR` in
+  `api/orders.js`, the card option's note in `data.js` («از طریق واتساپ،
+  تلگرام یا اینستاگرام پیام بدهید؛ سفارش در سایت ثبت نمی‌شود»), and the
+  payment server's "amount not allowed" error (live only after the VPS is
+  updated). These texts are fixed, so if WhatsApp or Telegram is ever
+  removed from `data.js`, change them too. The one exception is the «یا
+  تماس بگیرید» line, shown only while `contactPhone` is set; a test in
+  `card-to-card.test.js` enforces this (admin-only texts that point staff
+  to the developer are left as they are).
 - **Online-payment switch**: `ONLINE_PAYMENT.enabled` in `data.js` (on in
   production). Setting it to `false` and deploying stops all ordering: every
   payment option then shows the same contact box with «پرداخت آنلاین فعلاً

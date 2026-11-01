@@ -982,16 +982,23 @@ function footer() {
           <div>
             <h4>تماس</h4>
             <div class="footer-links">
-              <a href="${esc(COPY.instagramUrl)}" target="_blank" rel="noopener"
-                 style="display:flex;align-items:center;gap:7px">
-                ${icon('instagram', 'icon icon-sm')}<span class="ltr">@${esc(COPY.instagram)}</span>
-              </a>
-              ${contactPhoneIntl() ? `<span class="ltr" style="direction:ltr;text-align:right">${esc(COPY.contactPhone)}</span>` : ''}
               ${
                 messageOnlyWhatsAppHref()
                   ? `<a href="${esc(messageOnlyWhatsAppHref())}" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;gap:7px">${whatsappIcon()}<span>پیام در واتساپ</span></a>`
                   : ''
               }
+              ${
+                telegramHref()
+                  ? `<a href="${esc(telegramHref())}" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">${telegramIcon()}<span>پیام در تلگرام</span>${
+                      COPY.telegram ? `<span class="ltr">@${esc(String(COPY.telegram).replace(/^@/, ''))}</span>` : ''
+                    }</a>`
+                  : ''
+              }
+              <a href="${esc(COPY.instagramUrl)}" target="_blank" rel="noopener"
+                 style="display:flex;align-items:center;gap:7px">
+                ${icon('instagram', 'icon icon-sm')}<span class="ltr">@${esc(COPY.instagram)}</span>
+              </a>
+              ${contactPhoneIntl() ? `<span class="ltr" style="direction:ltr;text-align:right">${esc(COPY.contactPhone)}</span>` : ''}
               <span>${COPY.contactHours}</span>
             </div>
           </div>
@@ -1764,8 +1771,8 @@ function screenCheckout() {
    The same box stands in for online payment if ONLINE_PAYMENT is switched
    off in data.js, since online payment is the only way to place an order. */
 
-const CARD_TO_CARD_MSG = 'برای پرداخت کارت به کارت، لطفاً از طریق اینستاگرام یا فرم تماس به ما پیام بدهید';
-const ONLINE_OFF_MSG = 'پرداخت آنلاین فعلاً در دسترس نیست. برای خرید، لطفاً از طریق اینستاگرام یا فرم تماس به ما پیام بدهید';
+const CARD_TO_CARD_MSG = 'برای پرداخت کارت به کارت، لطفاً از طریق واتساپ، تلگرام یا اینستاگرام به ما پیام بدهید';
+const ONLINE_OFF_MSG = 'پرداخت آنلاین فعلاً در دسترس نیست. برای خرید، لطفاً از طریق واتساپ، تلگرام یا اینستاگرام به ما پیام بدهید';
 
 /** A number from data.js in international form without "+": Persian/Arabic
  * digits converted, anything but digits dropped, the leading 0 replaced by
@@ -1835,18 +1842,35 @@ function whatsappIcon(cls = 'icon icon-sm') {
   );
 }
 
-/** The checkout box. The WhatsApp button and the «یا تماس بگیرید» line each
- * show only while data.js has a number for them; Instagram and the contact
- * page are always there. With no WhatsApp button, Instagram is the main one. */
+/** COPY.telegramUrl, or a t.me link made from COPY.telegram; "" when both
+ * are empty, and every Telegram button and row hides. */
+function telegramHref() {
+  const handle = String(COPY.telegram || '').trim().replace(/^@/, '');
+  return String(COPY.telegramUrl || '').trim() || (handle ? 'https://t.me/' + encodeURIComponent(handle) : '');
+}
+
+/** Telegram's logo (filled, like whatsappIcon()). */
+function telegramIcon(cls = 'icon icon-sm') {
+  return (
+    `<svg class="${cls}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M12 0a12 12 0 1 0 0 24 12 12 0 0 0 0-24Zm5.56 7.2-1.97 9.3c-.15.66-.54.82-1.09.51l-3-2.21-1.45 1.4c-.16.16-.3.29-.6.29l.21-3.05 5.56-5.02c.24-.21-.05-.33-.37-.12L7.98 12.6l-2.96-.92c-.64-.2-.66-.64.14-.95l11.57-4.46c.54-.2 1.01.13.83.93Z"/></svg>`
+  );
+}
+
+/** The checkout box: WhatsApp (with the cart), Telegram, Instagram, the
+ * contact page. WhatsApp, Telegram and the «یا تماس بگیرید» line each show
+ * only while data.js has them; Instagram and the contact page are always
+ * there. The first button shown is the main one. */
 function payByContactHtml() {
   const wa = whatsAppHref();
+  const tg = telegramHref();
   const tel = contactTelHref();
   return `
         <div class="pay-contact" role="note">
           <p>${state.pay === 'card' && ONLINE_PAYMENT.enabled ? CARD_TO_CARD_MSG : ONLINE_OFF_MSG}</p>
           <div class="pay-contact-links">
             ${wa ? `<a class="btn btn-accent" data-wa href="${esc(wa)}" target="_blank" rel="noopener noreferrer">${whatsappIcon()}ارسال پیام در واتساپ</a>` : ''}
-            <a class="btn ${wa ? 'btn-ghost' : 'btn-accent'}" href="${esc(COPY.instagramUrl)}" target="_blank" rel="noopener">${icon(
+            ${tg ? `<a class="btn ${wa ? 'btn-ghost' : 'btn-accent'}" href="${esc(tg)}" target="_blank" rel="noopener noreferrer">${telegramIcon()}پیام در تلگرام</a>` : ''}
+            <a class="btn ${wa || tg ? 'btn-ghost' : 'btn-accent'}" href="${esc(COPY.instagramUrl)}" target="_blank" rel="noopener">${icon(
     'instagram',
     'icon icon-sm'
   )}پیام در اینستاگرام</a>
@@ -1901,7 +1925,7 @@ function screenPayment() {
     ${
       r.ok
         ? ''
-        : `<div class="alert alert-error" style="margin-top:12px">اگر مبلغی از حساب شما کسر شده ولی پرداخت تأیید نشده، مبلغ معمولاً ظرف ۷۲ ساعت توسط بانک بازگردانده می‌شود. در غیر این صورت از طریق اینستاگرام یا فرم تماس به ما پیام بدهید.</div>`
+        : `<div class="alert alert-error" style="margin-top:12px">اگر مبلغی از حساب شما کسر شده ولی پرداخت تأیید نشده، مبلغ معمولاً ظرف ۷۲ ساعت توسط بانک بازگردانده می‌شود. در غیر این صورت از طریق واتساپ، تلگرام یا اینستاگرام به ما پیام بدهید.</div>`
     }
 
     <div style="display:flex;gap:12px;margin-top:24px;flex-wrap:wrap">
@@ -2027,26 +2051,35 @@ function screenContact() {
       state.contactSending ? 'در حال ارسال...' : 'ارسال پیام'
     }</button>
 
-    <div class="panel" style="margin-top:30px">
+    <div class="panel" style="margin-top:30px;display:flex;flex-direction:column;gap:14px">
+      ${
+        messageOnlyWhatsAppHref()
+          ? `<div style="display:flex;align-items:center;gap:12px">
+        ${whatsappIcon('icon')}<a href="${esc(messageOnlyWhatsAppHref())}" target="_blank" rel="noopener noreferrer">پیام در واتساپ</a>
+      </div>`
+          : ''
+      }
+      ${
+        telegramHref()
+          ? `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        ${telegramIcon('icon')}<a href="${esc(telegramHref())}" target="_blank" rel="noopener noreferrer">پیام در تلگرام</a>${
+              COPY.telegram ? `<a class="ltr" href="${esc(telegramHref())}" target="_blank" rel="noopener noreferrer">@${esc(String(COPY.telegram).replace(/^@/, ''))}</a>` : ''
+            }
+      </div>`
+          : ''
+      }
       <div style="display:flex;align-items:center;gap:12px">
         ${icon('instagram')}
         <a class="ltr" href="${esc(COPY.instagramUrl)}" target="_blank" rel="noopener">@${esc(COPY.instagram)}</a>
       </div>
       ${
         contactPhoneIntl()
-          ? `<div style="display:flex;align-items:center;gap:12px;margin-top:14px">
+          ? `<div style="display:flex;align-items:center;gap:12px">
         ${icon('phone')}<span class="ltr" style="direction:ltr">${esc(COPY.contactPhone)}</span>
       </div>`
           : ''
       }
-      ${
-        messageOnlyWhatsAppHref()
-          ? `<div style="display:flex;align-items:center;gap:12px;margin-top:14px">
-        ${whatsappIcon('icon')}<a href="${esc(messageOnlyWhatsAppHref())}" target="_blank" rel="noopener noreferrer">پیام در واتساپ</a>
-      </div>`
-          : ''
-      }
-      <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
+      <div style="display:flex;align-items:center;gap:12px">
         ${icon('clock')}<span>${COPY.contactHours}</span>
       </div>
     </div>
@@ -2061,7 +2094,7 @@ function screenContact() {
 const TRACK_STEP = { pending: 1, paid: 1, preparing: 2, shipped: 3, delivered: 3 };
 const TRACK_PAYMENT_NOTICE = {
   pending_payment: 'پرداخت آنلاین این سفارش هنوز تأیید نشده است. اگر پرداخت را کامل نکرده‌اید، سفارش ارسال نمی‌شود.',
-  payment_failed: 'پرداخت آنلاین این سفارش ناموفق بود و سفارش ارسال نمی‌شود. اگر مبلغی از حساب شما کسر شده، از طریق اینستاگرام یا فرم تماس به ما پیام بدهید.',
+  payment_failed: 'پرداخت آنلاین این سفارش ناموفق بود و سفارش ارسال نمی‌شود. اگر مبلغی از حساب شما کسر شده، از طریق واتساپ، تلگرام یا اینستاگرام به ما پیام بدهید.',
 };
 
 function screenTrack() {
