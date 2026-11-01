@@ -1286,7 +1286,7 @@ function orderPrintHtml(o, items, origin = '') {
   .label .row { margin-top: 1mm; }
   .label .method { margin-top: 2mm; padding-top: 1.5mm; border-top: 1px solid #000; font-weight: 700; font-size: 14pt; }
   .sender { border: 1.5px solid #000; padding: 1.5mm 4mm; margin-top: 3mm; font-size: 12pt; }
-  .sender b { font-size: 11pt; margin-inline-end: 3mm; }
+  .sender b { font-size: 11pt; }
   .notes { border: 1px solid #000; padding: 2.5mm 4mm; margin-top: 3mm; font-size: 11pt; white-space: pre-wrap; }
   .cut { margin: 4.5mm 0 4mm; border-top: 1.5px dashed #000; position: relative; height: 0; }
   .cut span { position: absolute; top: -9pt; inset-inline-start: 4mm; background: #fff; padding: 0 2mm; font-size: 12pt; }
@@ -1326,7 +1326,7 @@ function orderPrintHtml(o, items, origin = '') {
       ${o.postcode ? `<div class="row">کد پستی: ${ltr(o.postcode)}</div>` : ''}
       <div class="method">روش ارسال: ${escapeHtml(method)}</div>
     </div>
-    <div class="sender"><b>فرستنده</b>${escapeHtml(SHOP_SENDER_NAME)} — ${ltr(phoneDisplay(SHOP_SENDER_PHONE))}</div>
+    <div class="sender"><b>فرستنده:</b> ${escapeHtml(SHOP_SENDER_NAME)} — ${ltr(phoneDisplay(SHOP_SENDER_PHONE))}</div>
     ${o.note ? `<div class="notes"><b>توضیحات مشتری:</b> ${escapeHtml(o.note)}</div>` : ''}
   </div>
 

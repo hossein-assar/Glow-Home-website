@@ -190,14 +190,15 @@ test('print: no card number; the only phone numbers are the customer\'s and the 
 test('print: «فرستنده» — the shop\'s name and number, smaller, between the recipient box and the cut line', () => {
   for (const o of [ORDER, { ...ORDER, status: 'pending_payment', paid_at: null, payment_ref_id: null }, { ...ORDER, status: 'payment_failed', paid_at: null }]) {
     const html = orderPrintHtml(o, ITEMS);
-    const sender = `<div class="sender"><b>فرستنده</b>سحر راد — <span class="ltr">${env.phoneDisplay(env.SHOP_SENDER_PHONE)}</span></div>`;
+    // «فرستنده:» bold with its colon, a normal space, then the name and the number
+    const sender = `<div class="sender"><b>فرستنده:</b> سحر راد — <span class="ltr">${env.phoneDisplay(env.SHOP_SENDER_PHONE)}</span></div>`;
     assert.equal(html.split(sender).length, 2, 'once, for status ' + o.status);
     const at = (s) => html.indexOf(s);
     assert.ok(at('<div class="method">') < at(sender) && at(sender) < at('<div class="notes">') && at('<div class="notes">') < at('<div class="cut"'), 'recipient box → sender → notes → ✂');
   }
   const css = orderPrintHtml(ORDER, ITEMS);
   assert.match(css, /\.sender \{ border: 1\.5px solid #000; padding: 1\.5mm 4mm; margin-top: 3mm; font-size: 12pt; \}/);
-  assert.match(css, /\.sender b \{ font-size: 11pt;/);
+  assert.match(css, /\.sender b \{ font-size: 11pt; \}/);
   assert.match(css, /\.label \{[^}]*font-size: 13pt; \}/, 'the recipient block stays bigger');
   assert.match(css, /\.label \.name \{ font-size: 19pt;/);
 });
