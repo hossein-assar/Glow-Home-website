@@ -1,8 +1,11 @@
-// The shop's WhatsApp number (messages only) is written in one place,
-// COPY.contactWhatsapp in data.js; app.js builds the wa.me links from it.
-// Fails if it is copied anywhere else in the repo — in any digit form, with
-// or without the 0 / +98 — so it can't end up as visible digits or in a
-// tel: link by hand. The number is read from data.js, never written here.
+// The shop's WhatsApp number (messages only) is written in one place for
+// the site, COPY.contactWhatsapp in data.js; app.js builds the wa.me links
+// from it. The one other copy allowed is admin/admin.js's SHOP_SENDER_PHONE
+// (the sender on the printed parcel label — admin.js can't load data.js;
+// admin-orders.test.js keeps the two equal). Fails if it is copied anywhere
+// else in the repo — in any digit form, with or without the 0 / +98 — so it
+// can't end up as visible digits or in a tel: link on the site by hand. The
+// number is read from data.js, never written here.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -36,13 +39,15 @@ test('COPY.contactWhatsapp is an Iranian mobile; COPY.contactPhone stays empty',
   assert.equal(COPY.contactPhone, '');
 });
 
-test('the WhatsApp number is written only in data.js (contactWhatsapp), in no other file, in any digit form', () => {
+test('the WhatsApp number is written only in data.js (contactWhatsapp) and admin.js (SHOP_SENDER_PHONE), in any digit form', () => {
   const hits = [];
   for (const file of textFiles(ROOT)) {
     readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
       if (NUMBER_RE.test(line)) hits.push(`${relative(ROOT, file)}:${i + 1}: ${line.trim()}`);
     });
   }
-  assert.equal(hits.length, 1, hits.join('\n'));
-  assert.match(hits[0], /^data\.js:\d+: contactWhatsapp: '[^']*',$/);
+  hits.sort();
+  assert.equal(hits.length, 2, hits.join('\n'));
+  assert.match(hits[0], /^admin\/admin\.js:\d+: const SHOP_SENDER_PHONE = '[^']*';$/);
+  assert.match(hits[1], /^data\.js:\d+: contactWhatsapp: '[^']*',$/);
 });

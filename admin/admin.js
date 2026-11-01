@@ -983,6 +983,11 @@ const SHIPPING_LABEL = { peyk: 'پیک تهران', tipax: 'تیپاکس' };
 // Mirrors data.js COPY.instagram (the printed order's footer); a test keeps
 // them equal. data.js isn't loaded here: its globals would clash.
 const SHOP_INSTAGRAM = 'glow.home__';
+// The sender on the printed parcel label. The number mirrors data.js
+// COPY.contactWhatsapp (a test keeps them equal); the print is the one place
+// it is shown as digits — the storefront only links to it.
+const SHOP_SENDER_NAME = 'سحر راد';
+const SHOP_SENDER_PHONE = '+989353431782';
 
 let ORDERS_CACHE = [];
 let ORDER_ITEMS_BY_ORDER = {};
@@ -1228,6 +1233,12 @@ function orderPaymentState(o) {
   };
 }
 
+// "+989123456789" → "+98 912 345 6789" (country code, then 3-3-4).
+function phoneDisplay(intl) {
+  const d = String(intl || '').replace(/\D/g, '');
+  return d.length === 12 && d.startsWith('98') ? `+98 ${d.slice(2, 5)} ${d.slice(5, 8)} ${d.slice(8)}` : String(intl || '');
+}
+
 function faNum(n) {
   return Number(n || 0).toLocaleString('fa-IR');
 }
@@ -1274,6 +1285,8 @@ function orderPrintHtml(o, items, origin = '') {
   .label .name { font-size: 19pt; font-weight: 700; line-height: 1.3; }
   .label .row { margin-top: 1mm; }
   .label .method { margin-top: 2mm; padding-top: 1.5mm; border-top: 1px solid #000; font-weight: 700; font-size: 14pt; }
+  .sender { border: 1.5px solid #000; padding: 1.5mm 4mm; margin-top: 3mm; font-size: 12pt; }
+  .sender b { font-size: 11pt; margin-inline-end: 3mm; }
   .notes { border: 1px solid #000; padding: 2.5mm 4mm; margin-top: 3mm; font-size: 11pt; white-space: pre-wrap; }
   .cut { margin: 4.5mm 0 4mm; border-top: 1.5px dashed #000; position: relative; height: 0; }
   .cut span { position: absolute; top: -9pt; inset-inline-start: 4mm; background: #fff; padding: 0 2mm; font-size: 12pt; }
@@ -1313,6 +1326,7 @@ function orderPrintHtml(o, items, origin = '') {
       ${o.postcode ? `<div class="row">کد پستی: ${ltr(o.postcode)}</div>` : ''}
       <div class="method">روش ارسال: ${escapeHtml(method)}</div>
     </div>
+    <div class="sender"><b>فرستنده</b>${escapeHtml(SHOP_SENDER_NAME)} — ${ltr(phoneDisplay(SHOP_SENDER_PHONE))}</div>
     ${o.note ? `<div class="notes"><b>توضیحات مشتری:</b> ${escapeHtml(o.note)}</div>` : ''}
   </div>
 

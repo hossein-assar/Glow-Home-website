@@ -232,14 +232,23 @@ decisions from code alone — read this before making structural changes.
   only from the order already loaded in the panel (no request), then opens
   the print dialog once IRANSansX has loaded. A4 portrait, black on white:
   header (Glow Home / برگه سفارش, order code, date), a bordered «ارسال به»
-  shipping label (name, mobile, address, city, postcode, method) with any
-  customer note, a ✂ cut line, the items table with جمع اقلام / packaging
+  shipping label (name, mobile, address, city, postcode, method), right
+  under it a smaller «فرستنده» box (1.5px border, 12pt, one line: «سحر راد
+  — +98 935 … » with the number in `.ltr`), any customer note, a ✂ cut
+  line (so the sender is part of the cut-off parcel label), the items table with جمع اقلام / packaging
   fee / discount / total, the payment line (online paid + کد پیگیری, or
   «پرداخت‌نشده» for pending/failed online orders), two tick boxes
   (بسته‌بندی شد / ارسال شد) and a footer with glow-home.ir and the Instagram
   handle (`SHOP_INSTAGRAM`, mirrored from data.js; a test keeps them equal).
-  Every order value is escaped. Never printed: the card number and any shop
-  phone number. Up to ~8 items fit one page; rows don't split, longer
+  The sender is `SHOP_SENDER_NAME` / `SHOP_SENDER_PHONE` in admin.js, the
+  number mirrored from data.js `COPY.contactWhatsapp` (admin.js can't load
+  data.js — its globals clash; `admin-orders.test.js` keeps them equal), and
+  its spaced form comes from `phoneDisplay()`, never typed. **This print is
+  the one place the WhatsApp number appears as digits**; the storefront only
+  links to it, and `whatsapp-number.test.js` allows the number in exactly
+  two lines: data.js `contactWhatsapp` and admin.js `SHOP_SENDER_PHONE`.
+  Every order value is escaped. Never printed: the card number, and any
+  phone number but the customer's and the sender's (never the old one). Up to ~8 items fit one page; rows don't split, longer
   orders continue on a second page. Tests: `admin-orders.test.js`.
 
 ## Catalog data model (products table)

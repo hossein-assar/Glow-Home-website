@@ -22,8 +22,10 @@ const env = new Function(
     grab(/const UNPAID_ONLINE = [^\n]*\n/),
     grab(/const SHIPPING_LABEL = [^\n]*\n/),
     grab(/const SHOP_INSTAGRAM = [^\n]*\n/),
-    ...['money', 'escapeHtml', 'faNum', 'orderPaymentState', 'orderPrintHtml', 'orderCardHtml', 'paymentInfoHtml'].map(fnSrc),
-    'return { orderPrintHtml, orderCardHtml, orderPaymentState, money, SHOP_INSTAGRAM };',
+    grab(/const SHOP_SENDER_NAME = [^\n]*\n/),
+    grab(/const SHOP_SENDER_PHONE = [^\n]*\n/),
+    ...['money', 'escapeHtml', 'faNum', 'phoneDisplay', 'orderPaymentState', 'orderPrintHtml', 'orderCardHtml', 'paymentInfoHtml'].map(fnSrc),
+    'return { orderPrintHtml, orderCardHtml, orderPaymentState, phoneDisplay, money, SHOP_INSTAGRAM, SHOP_SENDER_NAME, SHOP_SENDER_PHONE };',
   ].join('\n')
 )();
 const { orderPrintHtml, orderCardHtml, money } = env;
@@ -169,16 +171,53 @@ test('print: name, address, notes and the other order fields are escaped — not
   assert.equal((html.match(/<script/gi) || []).length, 0, 'the page has no script at all');
 });
 
-test('print: no card number, and no phone number but the customer\'s (none of the shop, not the old one)', () => {
+// The sender number as digits only, read from data.js — never typed here.
+const SENDER_DIGITS = COPY.contactWhatsapp.replace(/\D/g, '');
+
+test('print: no card number; the only phone numbers are the customer\'s and the sender\'s (never the old shop number)', () => {
   const html = orderPrintHtml(ORDER, ITEMS);
   assert.ok(!html.includes('502229') && !html.includes('5995') && !html.includes('******'), 'card number');
   assert.doesNotMatch(html, /کارت:|tel:|wa\.me|t\.me/);
   const latin = html.replace(/[۰-۹]/g, (d) => d.charCodeAt(0) - 0x6f0).replace(/[٠-٩]/g, (d) => d.charCodeAt(0) - 0x660);
-  const phones = [...latin.matchAll(/(?<![0-9])(?:\+98|0098|0)?9[0-9]{2}[\s\-.]?[0-9]{3}[\s\-.]?[0-9]{4}(?![0-9])/g)].map((m) => m[0]);
-  assert.deepEqual(phones, ['09121234567'], 'only the customer\'s mobile');
+  const phones = [...latin.matchAll(/(?<![0-9])(?:\+98|0098|0)?[\s]?9[0-9]{2}[\s\-.]?[0-9]{3}[\s\-.]?[0-9]{4}(?![0-9])/g)]
+    .map((m) => m[0].replace(/\D/g, '').replace(/^(0098|98|0)/, ''));
+  assert.deepEqual(phones, ['9121234567', SENDER_DIGITS.slice(2)], 'the customer\'s mobile, then the sender\'s');
   // the old shop number (see old-phone-number.test.js), in any digit form
   const OLD = [9, 1, 9, 5, 8, 1, 9, 2, 0, 3];
   assert.doesNotMatch(latin, new RegExp(OLD.join('[\\s\\-.]*')));
+});
+
+test('print: «فرستنده» — the shop\'s name and number, smaller, between the recipient box and the cut line', () => {
+  for (const o of [ORDER, { ...ORDER, status: 'pending_payment', paid_at: null, payment_ref_id: null }, { ...ORDER, status: 'payment_failed', paid_at: null }]) {
+    const html = orderPrintHtml(o, ITEMS);
+    const sender = `<div class="sender"><b>فرستنده</b>سحر راد — <span class="ltr">${env.phoneDisplay(env.SHOP_SENDER_PHONE)}</span></div>`;
+    assert.equal(html.split(sender).length, 2, 'once, for status ' + o.status);
+    const at = (s) => html.indexOf(s);
+    assert.ok(at('<div class="method">') < at(sender) && at(sender) < at('<div class="notes">') && at('<div class="notes">') < at('<div class="cut"'), 'recipient box → sender → notes → ✂');
+  }
+  const css = orderPrintHtml(ORDER, ITEMS);
+  assert.match(css, /\.sender \{ border: 1\.5px solid #000; padding: 1\.5mm 4mm; margin-top: 3mm; font-size: 12pt; \}/);
+  assert.match(css, /\.sender b \{ font-size: 11pt;/);
+  assert.match(css, /\.label \{[^}]*font-size: 13pt; \}/, 'the recipient block stays bigger');
+  assert.match(css, /\.label \.name \{ font-size: 19pt;/);
+});
+
+test('print: the sender constants mirror data.js, and the spaced form is derived from them', () => {
+  assert.equal(env.SHOP_SENDER_PHONE, COPY.contactWhatsapp);
+  assert.equal(env.SHOP_SENDER_NAME, 'سحر راد');
+  assert.equal(env.phoneDisplay(env.SHOP_SENDER_PHONE), `+98 ${SENDER_DIGITS.slice(2, 5)} ${SENDER_DIGITS.slice(5, 8)} ${SENDER_DIGITS.slice(8)}`);
+  assert.equal(env.phoneDisplay('+989121234567'), '+98 912 123 4567');
+  // the display form is never typed into admin.js — only the constant
+  assert.ok(!adminJs.includes(env.phoneDisplay(env.SHOP_SENDER_PHONE)));
+  assert.match(fnSrc('orderPrintHtml'), /phoneDisplay\(SHOP_SENDER_PHONE\)/);
+});
+
+test('print: the page keeps its parts, in order — the sender box is the only addition', () => {
+  const html = orderPrintHtml(ORDER, ITEMS);
+  const parts = ['class="head"', 'class="meta"', '<h2>ارسال به</h2>', 'class="label"', 'class="sender"', 'class="notes"', 'class="cut"', '<h2>محتویات سفارش</h2>', '<table>', 'class="totals"', 'class="pay"', 'class="checks"', 'class="foot"'];
+  const at = parts.map((p) => html.indexOf(p));
+  assert.ok(at.every((i, k) => i > 0 && (k === 0 || i > at[k - 1])), 'order: ' + at);
+  for (const p of parts) assert.equal(html.split(p).length, 2, 'once: ' + p);
 });
 
 test('print: unpaid or failed online orders say «پرداخت‌نشده», never «پرداخت‌شده», and show no tracking code', () => {
