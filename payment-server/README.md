@@ -112,9 +112,19 @@ with the step name.
 | `PUBLIC_API_URL` | yes | this server, `https://pay.glow-home.ir` |
 | `CALLBACK_URL` | production | `https://glow-home.ir/api/pay-callback` |
 | `PORT` | no (default `3000`) | must match nginx `proxy_pass` |
+| `RESEND_API_KEY` | for the paid-order email | Resend API key; unset = no email (`email.disabled` at startup) |
+| `ORDER_NOTIFY_EMAIL` | for the paid-order email | the shop's inbox |
+| `EMAIL_FROM` | for the paid-order email | `Glow Home <orders@glow-home.ir>` (domain verified in Resend) |
 
 After editing `.env`: `pm2 restart glow-payment --update-env`, then check
 the `server.started` line and `/health/deep`.
+
+**Paid-order email:** sent once per order when `/api/verify` marks it paid
+(see `src/email.js`). Log lines: `email.paid_sent`, `email.paid_failed`
+(order code + error only), `email.disabled` (startup, names of missing
+vars). To check the email setup without touching any order:
+`node scripts/send-test-email.js` — one email marked «[آزمایشی]», order
+`TEST-0000`, no Supabase access.
 
 ## Local development (sandbox)
 

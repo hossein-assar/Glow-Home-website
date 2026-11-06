@@ -56,7 +56,7 @@ export function fetchWithTimeout(fetchImpl = fetch, ms = SUPABASE_TIMEOUT_MS) {
 // Calls that are safe to repeat get one more try after RETRY_DELAY_MS, each
 // try limited to ATTEMPT_MS so both fit inside the app's 10 s step limit
 // (4.5 + 0.5 + 4.5 s). Which calls, and why the others are not retried:
-//   fetchProductsBySlugs, findOrderByAuthority, ping — reads.
+//   fetchProductsBySlugs, findOrderByAuthority, fetchOrderForEmail, ping — reads.
 //   setAuthority — sets the same value on the same pending order; a second
 //     run after a lost answer finds it already set, so it's harmless.
 //   nextOrderCode — a sequence never hands out a number twice, so a retry
@@ -162,6 +162,29 @@ export function createDb({
           .abortSignal(signal);
         check(error, 'find order by authority');
         return data;
+      });
+    },
+
+    /**
+     * The order and its items for the paid-order email (email.js). Only the
+     * columns the email shows — never payment_card_pan. Reads, so retried.
+     */
+    async fetchOrderForEmail(orderId) {
+      return retry(async (signal) => {
+        const { data: order, error } = await sb
+          .from('orders')
+          .select('id, code, customer_name, phone, city, address, postcode, note, shipping_method, total, paid_at, payment_ref_id')
+          .eq('id', orderId)
+          .single()
+          .abortSignal(signal);
+        check(error, 'fetch order for email');
+        const { data: items, error: itemsErr } = await sb
+          .from('order_items')
+          .select('product_id, name_fa, qty, unit_price')
+          .eq('order_id', orderId)
+          .abortSignal(signal);
+        check(itemsErr, 'fetch order items for email');
+        return { order, items: items || [] };
       });
     },
 

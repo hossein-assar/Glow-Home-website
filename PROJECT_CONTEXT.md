@@ -180,16 +180,45 @@ decisions from code alone — read this before making structural changes.
   This replaced an earlier version of the banner that asked customers to
   screenshot their cart and message a WhatsApp number — that flow and its
   icon/CSS (`whatsappIcon()`, `.whatsapp-number`) are gone entirely now.
-- **Email**: the site sends one email, from the contact form, via
-  Resend's API (plain `fetch()`, no SDK) through the shared sender
-  `api/_email.js`. Needs `RESEND_API_KEY` and `ORDER_NOTIFY_EMAIL` (the
-  recipient) set in Vercel's environment variables — never in code. The
-  sender is `EMAIL_FROM` (e.g. `Glow Home <orders@glow-home.ir>`, domain
-  verified in Resend); only when that is unset does it fall back to
-  `onboarding@resend.dev`, which Resend refuses (403) for anyone but the
-  account owner — so it must be set in Production. There is no new-order
-  email any more: it came from `/api/orders.js`, which no longer takes
-  orders, and the payment server sends none.
+- **Email**: two emails, both to the shop, via Resend's API (plain
+  `fetch()`, no SDK), from two copies of the same small sender:
+  - the contact form, through `api/_email.js` on Vercel (env vars in
+    Vercel);
+  - **«سفارش جدید پرداخت‌شده — GH-…»**, from the payment server
+    (`payment-server/src/email.js`, a copy of `api/_email.js` because the
+    VPS deploys only `payment-server/`; env vars in the VPS
+    `payment-server/.env`). `/api/orders.js` no longer takes orders, so
+    this is the only new-order email.
+  Both need `RESEND_API_KEY` and `ORDER_NOTIFY_EMAIL` (the recipient) —
+  never in code. The sender is `EMAIL_FROM` (e.g. `Glow Home
+  <orders@glow-home.ir>`, domain verified in Resend); only when that is
+  unset does it fall back to `onboarding@resend.dev`, which Resend refuses
+  (403) for anyone but the account owner — so it must be set.
+  `email-from.test.js` allows that fallback (and a direct Resend call)
+  only in these two files.
+- **Paid-order email** (payment server): sent exactly once per order, at
+  its first transition to paid. `/api/verify` calls
+  `notifyPaid(order.id, code)` only when `db.markPaid()` returns `'paid'`
+  — the result of `mark_order_paid()`'s own row-locked update that sets
+  `paid_at`; a repeated or concurrent callback, a refresh or a retry gets
+  `'already_paid'` and sends nothing (no in-memory flag). It starts after
+  the redirect and is never awaited, so it can't delay or change the
+  payment; every failure (order read, Resend down or refusing, 10 s
+  timeout, a bug) is caught and logged as one `email.paid_failed` line
+  with the order code and the error name/status — never the body, the
+  recipient, the key or Resend's reply. Success logs `email.paid_sent`.
+  Missing `RESEND_API_KEY` / `ORDER_NOTIFY_EMAIL`: one `email.disabled`
+  line at startup (names only), then nothing. No email for failed or
+  cancelled payments, none to the customer. The order is re-read by
+  `db.fetchOrderForEmail()`, which never selects the card number. Body:
+  Persian RTL HTML, every value escaped — code, paid date/time (Tehran,
+  Persian digits), name, mobile, address, city, postcode, note, method
+  (پیک تهران / تیپاکس, no courier amount), item lines (name with its
+  options, qty, unit price, line total), packaging fee, total paid, کد
+  پیگیری, and «glow-home.ir/admin (سفارش‌ها ← چاپ سفارش)». No card number,
+  no shop phone, no «تماس بگیرید». One-off check from the VPS, no DB
+  access at all: `node scripts/send-test-email.js` (sends one email
+  marked «[آزمایشی]», order `TEST-0000`). Tests: `paid-email.test.js`.
 - **Contact form**: `/api/contact.js` emails the shop through that shared
   sender, subject «پیام جدید از فرم تماس». A missing key or failed
   send returns a generic error to the page (the email is the whole job, so

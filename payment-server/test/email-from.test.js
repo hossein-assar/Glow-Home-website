@@ -1,5 +1,6 @@
-// Email sender (api/_email.js, used by api/contact.js — the only email the
-// site sends; api/orders.js no longer takes orders, so it sends none):
+// Email sender (api/_email.js, used by api/contact.js; api/orders.js no
+// longer takes orders, so it sends none — the paid-order email comes from
+// the payment server's own copy, payment-server/src/email.js):
 // every email goes out "from" EMAIL_FROM when it is set — Resend refuses
 // onboarding@resend.dev (403, testing-domain restriction) for real mail —
 // and to ORDER_NOTIFY_EMAIL. fetch is stubbed — no email is really sent.
@@ -73,18 +74,23 @@ test('api/orders.js sends no email: it no longer takes orders', () => {
   assert.doesNotMatch(src, /_email|sendShopEmail|RESEND_API_KEY|ORDER_NOTIFY_EMAIL/);
 });
 
-test('no sender hard-codes onboarding@resend.dev: only the fallback in api/_email.js names it', () => {
+test('no sender hard-codes onboarding@resend.dev: only the fallback in the two senders names it', () => {
+  // The two senders: api/_email.js (Vercel) and its copy for the VPS,
+  // payment-server/src/email.js (the VPS deploys only payment-server/).
   const dirs = [new URL('../../api/', import.meta.url), new URL('../src/', import.meta.url)];
+  const senders = new Set([`${dirs[0]}_email.js`, `${dirs[1]}email.js`]);
   for (const dir of dirs) {
     for (const f of readdirSync(dir).filter((n) => n.endsWith('.js'))) {
       const src = readFileSync(new URL(f, dir), 'utf8');
       const hits = src.split('\n').filter((l) => l.includes(TESTING));
-      if (dir === dirs[0] && f === '_email.js') {
-        assert.deepEqual(hits, ["const FALLBACK_FROM = 'Glow Home <onboarding@resend.dev>';"]);
+      const sender = senders.has(`${dir}${f}`);
+      if (sender) {
+        assert.equal(hits.length, 1, f);
+        assert.match(hits[0], /^(export )?const FALLBACK_FROM = 'Glow Home <onboarding@resend\.dev>';$/, f);
       } else {
         assert.deepEqual(hits, [], f);
+        assert.doesNotMatch(src, /api\.resend\.com/, f + ' calls Resend directly');
       }
-      if (f !== '_email.js') assert.doesNotMatch(src, /api\.resend\.com/, f + ' calls Resend directly');
     }
   }
 });

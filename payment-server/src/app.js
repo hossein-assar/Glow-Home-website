@@ -1,6 +1,6 @@
 // Express app: /health, POST /api/checkout, GET /api/verify.
-// Dependencies are injected (createApp({ config, db, zarinpal })) so tests
-// can run the real routes against fakes.
+// Dependencies are injected (createApp({ config, db, zarinpal, notifyPaid }))
+// so tests can run the real routes against fakes.
 
 import express from 'express';
 import helmet from 'helmet';
@@ -105,7 +105,9 @@ export const DEEP_HEALTH = { slowMs: 1500, timeoutMs: 5000 };
 
 const errorFields = (err) => ({ error: (err && err.name) || 'Error', message: String((err && err.message) || err).slice(0, 300) });
 
-export function createApp({ config, db, zarinpal, logger = log, timeouts = DEFAULT_TIMEOUTS, deepHealth = DEEP_HEALTH }) {
+// notifyPaid(orderId, code): the paid-order email (email.js
+// createPaidNotifier). Default: no email.
+export function createApp({ config, db, zarinpal, notifyPaid = () => {}, logger = log, timeouts = DEFAULT_TIMEOUTS, deepHealth = DEEP_HEALTH }) {
   const app = express();
 
   app.set('trust proxy', 'loopback'); // behind nginx on the same host (README)
@@ -380,7 +382,19 @@ export function createApp({ config, db, zarinpal, logger = log, timeouts = DEFAU
 
       if (marked === 'paid' || marked === 'already_paid') {
         logger('info', 'verify.paid', { order: order.code, ref_id: result.refId, zp_code: result.code, result: marked });
-        return back(order.code, 'ok');
+        back(order.code, 'ok');
+        // The email goes out exactly once: only 'paid' — the one call where
+        // mark_order_paid() itself moved the row to paid (row-locked; every
+        // later or concurrent call gets 'already_paid'). Started after the
+        // redirect and never awaited, so it can't delay or fail the payment.
+        if (marked === 'paid') {
+          try {
+            Promise.resolve(notifyPaid(order.id, order.code)).catch(() => {});
+          } catch {
+            /* the notifier logs its own failures; nothing may reach the payment flow */
+          }
+        }
+        return;
       }
 
       // Verified money on an order that can't become paid (e.g. cancelled

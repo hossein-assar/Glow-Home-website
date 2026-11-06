@@ -3,6 +3,7 @@
 import { createApp, log } from './app.js';
 import { loadConfig, startupLogFields } from './config.js';
 import { createDb } from './db.js';
+import { createPaidNotifier, emailConfigured, missingEmailVars } from './email.js';
 import { createZarinpalClient } from './zarinpal.js';
 
 let config;
@@ -14,10 +15,17 @@ try {
   process.exit(1);
 }
 
+const db = createDb({ supabaseUrl: config.supabaseUrl, serviceRoleKey: config.supabaseServiceRoleKey });
+
+// Paid-order email: optional. Missing key or recipient → one line now, then
+// every paid order simply sends nothing (names only, never values).
+if (!emailConfigured()) log('info', 'email.disabled', { missing: missingEmailVars() });
+
 const app = createApp({
   config,
-  db: createDb({ supabaseUrl: config.supabaseUrl, serviceRoleKey: config.supabaseServiceRoleKey }),
+  db,
   zarinpal: createZarinpalClient({ baseUrl: config.zarinpal.baseUrl, merchantId: config.zarinpal.merchantId }),
+  notifyPaid: createPaidNotifier({ db, logger: log }),
 });
 
 // Bind to localhost only — nginx terminates TLS and proxies to this port.
