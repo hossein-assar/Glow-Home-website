@@ -13,7 +13,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { withBaseSize, sizeLine, priceCart, validateCheckoutBody } from '../src/pricing.js';
+import { TEHRAN_PACKAGING_FEE_TOMAN, withBaseSize, sizeLine, priceCart, validateCheckoutBody } from '../src/pricing.js';
 import { tomanToGatewayAmount } from '../src/config.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -100,17 +100,17 @@ for (const [height, toman] of [[40, 3500000], [50, 4000000]]) {
     const label = `شید گلدوزی مهتاب (${height} سانتی‌متر)`;
     const r = payServer([{ cartKey: key, qty: 2 }]);
     assert.equal(r.error, undefined);
-    assert.deepEqual(r.orderItems, [{ product_id: 'm1', name_fa: label, qty: 2, unit_price: toman }]);
-    assert.equal(r.total, toman * 2);
-    assert.equal(tomanToGatewayAmount(r.total), toman * 2 * 10);
+    assert.deepEqual(r.orderItems, [{ product_id: 'm1', name_fa: label, qty: 2, unit_price: toman }, { product_id: null, name_fa: 'هزینه بسته‌بندی', qty: 1, unit_price: TEHRAN_PACKAGING_FEE_TOMAN }]);
+    assert.equal(r.total, toman * 2 + TEHRAN_PACKAGING_FEE_TOMAN); // + the Tehran packaging fee
+    assert.equal(tomanToGatewayAmount(r.total), (toman * 2 + TEHRAN_PACKAGING_FEE_TOMAN) * 10);
   });
 }
 
 test('both sizes of مهتاب in one cart are two lines at their own prices', () => {
   const items = [{ cartKey: 'shade-embroidered-cylinder::h40', qty: 1 }, { cartKey: 'shade-embroidered-cylinder::h50', qty: 1 }];
   const r = payServer(items);
-  assert.equal(r.total, 7500000);
-  assert.deepEqual(r.orderItems.map((i) => i.unit_price), [3500000, 4000000]);
+  assert.equal(r.total, 7500000 + TEHRAN_PACKAGING_FEE_TOMAN);
+  assert.deepEqual(r.orderItems.map((i) => i.unit_price), [3500000, 4000000, TEHRAN_PACKAGING_FEE_TOMAN]); // two sizes + the Tehran fee line
 });
 
 test('a tampered client price is ignored: the price comes from the DB', () => {
@@ -118,7 +118,7 @@ test('a tampered client price is ignored: the price comes from the DB', () => {
   const v = validateCheckoutBody({ customer, items, total: 1000 });
   assert.deepEqual(v.value.items, [{ cartKey: 'shade-embroidered-cylinder::h50', qty: 1 }]);
   const r = payServer(items);
-  assert.equal(r.total, 4000000);
+  assert.equal(r.total, 4000000 + TEHRAN_PACKAGING_FEE_TOMAN);
   assert.equal(r.orderItems[0].unit_price, 4000000);
 });
 
@@ -133,7 +133,7 @@ test('unknown heights are rejected, never priced at the base price', () => {
 
 test('a key with no height is the base size, as before', () => {
   assert.deepEqual(sizeLine(mahtab, null), { price: 3500000, label: 'شید گلدوزی مهتاب' });
-  assert.equal(payServer([{ cartKey: 'lale', qty: 1 }], [lale]).total, 6500000);
+  assert.equal(payServer([{ cartKey: 'lale', qty: 1 }], [lale]).total, 6500000 + TEHRAN_PACKAGING_FEE_TOMAN);
 });
 
 test('the payment server reads height_cm with the product', () => {
@@ -142,7 +142,7 @@ test('the payment server reads height_cm with the product', () => {
 
 test('shade-type products are unchanged: strict shade keys, no base size added', () => {
   for (const [key, toman] of [['nila::h40::sembroidered', 8900000], ['gisoo::h120::splain', 9980000]]) {
-    assert.equal(payServer([{ cartKey: key, qty: 1 }], [nila, gisoo]).total, toman, key);
+    assert.equal(payServer([{ cartKey: key, qty: 1 }], [nila, gisoo]).total, toman + TEHRAN_PACKAGING_FEE_TOMAN, key);
   }
   for (const key of ['nila::h40', 'gisoo::h100', 'gisoo::h80::splain']) {
     assert.match(payServer([{ cartKey: key, qty: 1 }], [nila, gisoo]).error, /نوع شید/, key);

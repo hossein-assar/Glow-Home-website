@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
-import { SHADE_TYPES, priceCart, shadeTypesOf, validateCheckoutBody } from '../src/pricing.js';
+import { SHADE_TYPES, TEHRAN_PACKAGING_FEE_TOMAN, priceCart, shadeTypesOf, validateCheckoutBody } from '../src/pricing.js';
 import { paidOrderHtml } from '../src/email.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -164,8 +164,8 @@ test('shadeTypesOf: the stored list in its order; bad entries dropped; fallback 
 test('pricing: a shade added in the admin is priced from the DB row; the label is its Persian name', () => {
   const r = price('rosha::h45::skx91mzq', [ROSHA], 2);
   assert.equal(r.error, undefined);
-  assert.deepEqual(r.orderItems, [{ product_id: 'r1', name_fa: 'روشا (45 سانتی‌متر) — شید گلدوزی رز', qty: 2, unit_price: 7400000 }]);
-  assert.equal(r.total, 14800000);
+  assert.deepEqual(r.orderItems, [{ product_id: 'r1', name_fa: 'روشا (45 سانتی‌متر) — شید گلدوزی رز', qty: 2, unit_price: 7400000 }, { product_id: null, name_fa: 'هزینه بسته‌بندی', qty: 1, unit_price: TEHRAN_PACKAGING_FEE_TOMAN }]);
+  assert.equal(r.total, 14800000 + TEHRAN_PACKAGING_FEE_TOMAN);
   assert.equal(price('rosha::h45::splain', [ROSHA]).orderItems[0].name_fa, 'روشا (45 سانتی‌متر) — شید کتان', 'renamed: the new name');
 });
 
@@ -177,7 +177,7 @@ test('pricing: a tampered client price is ignored — only the cart key is read'
   });
   assert.equal(v.error, undefined);
   assert.deepEqual(v.value.items, [{ cartKey: 'rosha::h45::skx91mzq', qty: 1 }]);
-  assert.equal(price(v.value.items[0].cartKey, [ROSHA]).total, 7400000);
+  assert.equal(price(v.value.items[0].cartKey, [ROSHA]).total, 7400000 + TEHRAN_PACKAGING_FEE_TOMAN);
 });
 
 test('pricing: an unknown, deleted, other-product or prototype shade key is rejected; so is an unavailable shade', () => {
@@ -199,7 +199,7 @@ test('pricing: an unknown, deleted, other-product or prototype shade key is reje
 });
 
 test('pricing: products without shades are priced exactly as before', () => {
-  assert.deepEqual(price('lale', [LALE]).orderItems, [{ product_id: 'l1', name_fa: 'لاله', qty: 1, unit_price: 6500000 }]);
+  assert.deepEqual(price('lale', [LALE]).orderItems, [{ product_id: 'l1', name_fa: 'لاله', qty: 1, unit_price: 6500000 }, { product_id: null, name_fa: 'هزینه بسته‌بندی', qty: 1, unit_price: TEHRAN_PACKAGING_FEE_TOMAN }]);
   assert.equal(price('mahtab::h50', [MAHTAB]).orderItems[0].unit_price, 4000000);
   assert.equal(price('mahtab::h40', [MAHTAB]).orderItems[0].unit_price, 3500000);
   // an empty shade list on a product without shades changes nothing either

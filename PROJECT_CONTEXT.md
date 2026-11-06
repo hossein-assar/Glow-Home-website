@@ -169,6 +169,30 @@ decisions from code alone — read this before making structural changes.
   charged amount) into `shipping_cost`, so it isn't lost from the database,
   and the admin panel still surfaces it per-order and in the sales-summary
   COD note (see below).
+- **Packaging fee** («هزینه بسته‌بندی»): on every order, charged on the
+  site — **150,000 تومان in Tehran** (`TEHRAN_PACKAGING_FEE_TOMAN`),
+  **250,000 تومان everywhere else** (`PACKAGING_FEE_TOMAN`). One shared block
+  (`cityFees()`, `isTehranCity()`, the constants) is copied identically in
+  `app.js`, `api/orders.js` and `payment-server/src/pricing.js`;
+  `city-fees.test.js` fails if the copies differ, and checks each amount
+  appears only in its constant. Tehran is every spelling `isTehranCity()`
+  accepts (ي/ك, extra spaces, half-spaces, «Tehran», «شهر تهران», «تهران -
+  ونک», …); an empty city has no fee and the payment server refuses it
+  («شهر را وارد کنید.»). The fee is its own summary row in the cart and
+  checkout, follows the typed city live (the summary updates in place),
+  is added after any discount (never discounted), is part of the total and
+  of the ZarinPal amount (×10 in Rial), and is stored as its own
+  `order_items` row (`product_id` null) — so the admin card, the printed
+  order and the paid-order email show it like any line, and the sales
+  best-sellers skip it. The payment server takes it from the city alone; a
+  fee sent by the browser is never read. The free-shipping threshold
+  (`FREE_SHIP_OVER`) never waives it, in Tehran or elsewhere — and it can't
+  waive the courier either, since both couriers are pay-at-door. The
+  courier itself (پیک / تیپاکس) stays paid at the door, never on the site.
+  `TIPAX_EXTRA_FEE_TOMAN` (outside Tehran only) is prepared but 0. Orders
+  placed before the Tehran fee keep their stored lines and totals (no fee
+  row). Tests: `city-fees.test.js`, `checkout-city.test.js`,
+  `tehran-fee.test.js`.
 - **Snapp Pay installment banner**: a blue banner at the very top of
   checkout (above ورود) — static "برای خرید اقساطی با اسنپ‌پی..." prompt
   plus a بیشتر/بستن toggle button (`state.snappPayOpen`, same accordion
@@ -253,8 +277,8 @@ decisions from code alone — read this before making structural changes.
   Courier fees (پس‌کرایه, paid to the courier at the door) appear nowhere in
   the orders tab: an order card shows only «روش ارسال: پیک تهران / تیپاکس»,
   and the summary note only says revenue excludes them. The packaging fee
-  outside Tehran is different — charged on the site, its own order line
-  (`product_id` null), part of `total`.
+  (Tehran 150,000, elsewhere 250,000) is different — charged on the site,
+  its own order line (`product_id` null), part of `total`.
 - **Printable order** («چاپ سفارش» on each order card): `printOrder()` opens
   a new window (not a hidden iframe — Safari prints the parent page instead)
   and writes `orderPrintHtml(order, items, location.origin)` into it, built

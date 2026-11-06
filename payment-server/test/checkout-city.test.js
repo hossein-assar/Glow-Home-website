@@ -116,7 +116,7 @@ test('typing a city outside Tehran switches courier, «ارسال» row and the 
   assert.equal(c.renders(), 0);
 });
 
-test('switching back to تهران switches them back: پیک, its note, no fee', () => {
+test('switching back to تهران switches them back: پیک, its note, and the Tehran fee (۱۵۰٬۰۰۰) in the total', () => {
   const c = checkout();
   c.type('مشهد');
   c.type('تهران');
@@ -124,8 +124,27 @@ test('switching back to تهران switches them back: پیک, its note, no fee'
   assert.equal(c.option('peyk').checked, true);
   assert.equal(c.option('tipax').disabled, true);
   assert.equal(c.text(c.page['ship-hint'][0].innerHTML), HINT_PEYK);
-  assert.equal(c.page.fees[0].innerHTML, '');
-  assert.deepEqual(c.page.total.map((n) => n.textContent), ['۱۵٬۴۵۰٬۰۰۰ تومان', '۱۵٬۴۵۰٬۰۰۰ تومان']);
+  assert.equal(c.text(c.page.fees[0].innerHTML), 'هزینه بسته‌بندی ۱۵۰٬۰۰۰ تومان');
+  assert.deepEqual(c.page.total.map((n) => n.textContent), ['۱۵٬۶۰۰٬۰۰۰ تومان', '۱۵٬۶۰۰٬۰۰۰ تومان']);
+  assert.equal(c.renders(), 0);
+});
+
+test('the summary follows the typed city back and forth: Tehran in any spelling ۱۵۰٬۰۰۰, another city ۲۵۰٬۰۰۰', () => {
+  const c = checkout();
+  const seen = [];
+  for (const city of ['کرج', ' تهران  ', 'شيراز', 'Tehran', 'شهر تهران', 'كرج']) {
+    c.type(city);
+    seen.push([city, c.text(c.page.fees[0].innerHTML), c.page.total[0].textContent, c.state.ship]);
+  }
+  assert.deepEqual(seen, [
+    ['کرج', 'هزینه بسته‌بندی ۲۵۰٬۰۰۰ تومان', '۱۵٬۷۰۰٬۰۰۰ تومان', 'tipax'],
+    [' تهران  ', 'هزینه بسته‌بندی ۱۵۰٬۰۰۰ تومان', '۱۵٬۶۰۰٬۰۰۰ تومان', 'peyk'],
+    ['شيراز', 'هزینه بسته‌بندی ۲۵۰٬۰۰۰ تومان', '۱۵٬۷۰۰٬۰۰۰ تومان', 'tipax'],
+    ['Tehran', 'هزینه بسته‌بندی ۱۵۰٬۰۰۰ تومان', '۱۵٬۶۰۰٬۰۰۰ تومان', 'peyk'],
+    ['شهر تهران', 'هزینه بسته‌بندی ۱۵۰٬۰۰۰ تومان', '۱۵٬۶۰۰٬۰۰۰ تومان', 'peyk'],
+    ['كرج', 'هزینه بسته‌بندی ۲۵۰٬۰۰۰ تومان', '۱۵٬۷۰۰٬۰۰۰ تومان', 'tipax'],
+  ]);
+  assert.equal(c.renders(), 0, 'the form is never re-rendered while typing');
 });
 
 test('an emptied city keeps the last courier and shows «روش ارسال بر اساس شهری…»', () => {

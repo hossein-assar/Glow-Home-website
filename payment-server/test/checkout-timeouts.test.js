@@ -95,18 +95,19 @@ async function start({ db: dbOver = {}, zp: zpOver = {}, timeouts = FAST } = {})
 
 // ---- the exact cart ---------------------------------------------------------------
 
-test('the exact production cart (live rows): 194,500,000 Rial, order created, logged', async () => {
+test('the exact production cart (live rows), in Tehran: 194,500,000 Rial of products + the Tehran fee = 196,000,000 Rial, order created, logged', async () => {
   const s = await start();
   const r = await s.checkout();
   assert.equal(r.status, 200);
   assert.equal(r.json.ok, true);
   assert.equal(r.json.code, 'GH-1016');
-  assert.equal(s.orders[0].total, 15450000 + 4000000);
-  assert.equal(s.orders[0].payment_amount_rial, 194500000);
-  assert.equal(s.zarinpal.last.amount, 194500000);
+  assert.equal(s.orders[0].total, 15450000 + 4000000 + 150000);
+  assert.equal(s.orders[0].payment_amount_rial, 196000000);
+  assert.equal(s.zarinpal.last.amount, 196000000);
   assert.deepEqual(s.orders[0].items.map((i) => [i.name_fa, i.unit_price]), [
     ['گیسو (140 سانتی‌متر) — شید گلدوزی', 15450000],
     ['شید گلدوزی مهتاب (50 سانتی‌متر)', 4000000],
+    ['هزینه بسته‌بندی', 150000],
   ]);
   assert.deepEqual(s.event('checkout.received'), [{ items: ['gisoo::h140::sembroidered', 'shade-embroidered-cylinder::h50'] }]);
   assert.equal(s.event('checkout.created').length, 1);
@@ -123,7 +124,7 @@ test('each line of that cart alone, and «مهتاب» at its base size', async 
     const s = await start();
     const r = await s.checkout(items);
     assert.equal(r.status, 200, JSON.stringify(items));
-    assert.equal(s.orders[0].total, total);
+    assert.equal(s.orders[0].total, total + 150000, 'products + the Tehran packaging fee');
   }
 });
 

@@ -1,6 +1,6 @@
-// Packaging fee outside Tehran: 250,000 Toman on the bill (the online total
-// and the order total), never waived; nothing in Tehran. TIPAX_EXTRA_FEE_TOMAN
-// is prepared but 0. One shared rule — identical in app.js, api/orders.js and
+// Packaging fee on every order, on the bill (the online total and the order
+// total), never waived: 150,000 Toman in Tehran, 250,000 everywhere else.
+// TIPAX_EXTRA_FEE_TOMAN (outside Tehran only) is prepared but 0. One shared rule — identical in app.js, api/orders.js and
 // payment-server/src/pricing.js — and the servers take the fee from the city
 // alone. Stored as its own order line «هزینه بسته‌بندی» (no product).
 import { test, after } from 'node:test';
@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   cityFees, isTehranCity, shippingMethodForCity, priceCart, validateCheckoutBody,
-  PACKAGING_FEE_TOMAN, TIPAX_EXTRA_FEE_TOMAN, FREE_SHIP_OVER,
+  PACKAGING_FEE_TOMAN, TEHRAN_PACKAGING_FEE_TOMAN, TIPAX_EXTRA_FEE_TOMAN, FREE_SHIP_OVER,
 } from '../src/pricing.js';
 import { tomanToGatewayAmount } from '../src/config.js';
 import { createApp } from '../src/app.js';
@@ -21,6 +21,7 @@ const pricingJs = read('../src/pricing.js');
 const adminJs = read('../../admin/admin.js');
 
 const FEE_LINE = { product_id: null, name_fa: 'هزینه بسته‌بندی', qty: 1, unit_price: 250000 };
+const TEHRAN_FEE_LINE = { product_id: null, name_fa: 'هزینه بسته‌بندی', qty: 1, unit_price: 150000 };
 
 // The live gisoo row (same as checkout-timeouts.test.js).
 const gisoo = {
@@ -56,17 +57,23 @@ test('the city-fee rule is the same block in app.js, api/orders.js and pricing.j
   assert.equal(norm(ordersJs), norm(pricingJs));
 });
 
-test('amounts: packaging 250,000 Toman; the Tipax extra is prepared but off', () => {
+test('amounts: packaging 150,000 Toman in Tehran, 250,000 elsewhere; the Tipax extra is prepared but off', () => {
+  assert.equal(TEHRAN_PACKAGING_FEE_TOMAN, 150000);
   assert.equal(PACKAGING_FEE_TOMAN, 250000);
+  // one named constant in each copy, never a typed 150000 elsewhere in the code
+  for (const [name, src] of [['app.js', appJs], ['api/orders.js', ordersJs], ['pricing.js', pricingJs]]) {
+    assert.equal((src.match(/TEHRAN_PACKAGING_FEE_TOMAN = 150000;/g) || []).length, 1, name);
+    assert.equal((src.match(/150000|150,000|۱۵۰٬۰۰۰|۱۵۰,۰۰۰/g) || []).length, 1, name + ': the amount appears only in its constant');
+  }
   assert.equal(TIPAX_EXTRA_FEE_TOMAN, 0);
 });
 
 // ---- deciding "in Tehran" ---------------------------------------------------------------
 
-test('every spelling of Tehran is Tehran: no fee, courier پیک', () => {
+test('every spelling of Tehran is Tehran: the Tehran packaging fee (150,000), courier پیک', () => {
   for (const city of TEHRAN) {
     assert.equal(isTehranCity(city), true, JSON.stringify(city));
-    assert.deepEqual(cityFees(city), [], JSON.stringify(city));
+    assert.deepEqual(cityFees(city), [{ label: 'هزینه بسته‌بندی', amount: 150000 }], JSON.stringify(city));
     assert.equal(shippingMethodForCity(city), 'peyk', JSON.stringify(city));
   }
 });
@@ -94,7 +101,7 @@ test('the Tipax extra, once set above 0, adds its own line outside Tehran only',
      ${src} return { cityFees };`
   )();
   assert.deepEqual(fees('کرج'), [{ label: 'هزینه بسته‌بندی', amount: 250000 }, { label: 'هزینه اضافه تیپاکس', amount: 100000 }]);
-  assert.deepEqual(fees('تهران'), []);
+  assert.deepEqual(fees('تهران'), [{ label: 'هزینه بسته‌بندی', amount: 150000 }], 'Tehran: its packaging fee, no Tipax extra');
 });
 
 // ---- payment-server pricing --------------------------------------------------------------
@@ -109,26 +116,48 @@ test('Karaj: total = products + 250,000 Toman; ZarinPal gets it ×10 in Rial; it
   assert.deepEqual(r.fees, [{ label: 'هزینه بسته‌بندی', amount: 250000 }]);
 });
 
-test('Tehran: no fee line, total = products', () => {
+test('Tehran: total = products + 150,000 Toman; ZarinPal gets it ×10 in Rial; its own order line', () => {
   const r = priceCart({ items: CART, products: [gisoo], discountCode: null, city: 'تهران' });
-  assert.equal(r.total, 15450000);
-  assert.equal(tomanToGatewayAmount(r.total), 154500000);
-  assert.equal(r.orderItems.length, 1);
+  assert.equal(r.subtotal, 15450000); // products only
+  assert.equal(r.total, 15600000);
+  assert.equal(tomanToGatewayAmount(r.total), 156000000);
+  assert.deepEqual(r.orderItems.at(-1), TEHRAN_FEE_LINE);
+  assert.equal(r.orderItems.length, 2);
+  assert.deepEqual(r.fees, [{ label: 'هزینه بسته‌بندی', amount: 150000 }]);
+  assert.equal(r.shippingMethod, 'peyk');
+  assert.equal(r.shippingCost, 90000, 'the courier fee is stored for the admin, never charged');
 });
 
-test('the free-shipping threshold never waives the fee', () => {
-  const r = priceCart({ items: [{ cartKey: 'gisoo::h140::sembroidered', qty: 3 }], products: [gisoo], discountCode: null, city: 'اصفهان' });
-  assert.ok(r.subtotal > FREE_SHIP_OVER);
-  assert.equal(r.total, 3 * 15450000 + 250000);
+test('every city: total = items + that city\'s fee, and the bank amount is exactly the total ×10', () => {
+  for (const [cities, fee] of [[TEHRAN, 150000], [OUTSIDE, 250000]]) {
+    for (const city of cities) {
+      const r = priceCart({ items: [{ cartKey: 'gisoo::h120::splain', qty: 2 }], products: [gisoo], discountCode: null, city });
+      const items = r.orderItems.filter((it) => it.product_id != null).reduce((sum, it) => sum + it.unit_price * it.qty, 0);
+      const fees = r.orderItems.filter((it) => it.product_id == null);
+      assert.deepEqual(fees, [{ product_id: null, name_fa: 'هزینه بسته‌بندی', qty: 1, unit_price: fee }], city);
+      assert.equal(items, 2 * 9980000, city);
+      assert.equal(r.total, items + fee, city);
+      assert.equal(tomanToGatewayAmount(r.total), (items + fee) * 10, city);
+    }
+  }
+});
+
+test('the free-shipping threshold never waives the fee — in Tehran either', () => {
+  for (const [city, fee] of [['اصفهان', 250000], ['تهران', 150000]]) {
+    const r = priceCart({ items: [{ cartKey: 'gisoo::h140::sembroidered', qty: 3 }], products: [gisoo], discountCode: null, city });
+    assert.ok(r.subtotal > FREE_SHIP_OVER, city);
+    assert.equal(r.total, 3 * 15450000 + fee, city);
+  }
 });
 
 test('a client-sent fee is ignored: it is not even read from the body', () => {
-  for (const [city, expected] of [['کرج', 15700000], ['تهران', 15450000]]) {
+  for (const [city, expected] of [['کرج', 15700000], ['تهران', 15600000], ['Tehran', 15600000]]) {
     const v = validateCheckoutBody({
       customer: { name: 'سارا', phone: '+989121234567', city, address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' },
-      items: [{ cartKey: CART[0].cartKey, qty: 1, packaging_fee: 0 }],
-      packaging_fee: city === 'کرج' ? 0 : 250000,
-      fees: [],
+      items: [{ cartKey: CART[0].cartKey, qty: 1, packaging_fee: 0, fee: -150000 }],
+      packaging_fee: city === 'کرج' ? 0 : -1000000,
+      tehran_packaging_fee: 0,
+      fees: [{ label: 'هزینه بسته‌بندی', amount: 0 }],
       total: 1,
     });
     assert.equal(v.error, undefined);
@@ -142,39 +171,45 @@ test('a client-sent fee is ignored: it is not even read from the body', () => {
 const servers = [];
 after(() => servers.forEach((s) => s.close()));
 
-test('online checkout from Karaj: ZarinPal is asked for 157,000,000 Rial; the order stores the fee line', async () => {
-  const orders = [];
-  let requested;
-  const app = createApp({
-    config: { publicSiteUrl: 'https://glow-home.ir', callbackUrl: 'https://pay.glow-home.ir/api/verify', zarinpal: { mode: 'sandbox' } },
-    db: {
-      fetchProductsBySlugs: async () => [gisoo],
-      nextOrderCode: async () => 'GH-1020',
-      createOrder: async (o, items) => (orders.push({ ...o, items }), { id: 'o1', code: o.code }),
-      setAuthority: async () => {},
-      markFailed: async () => {},
-    },
-    zarinpal: { startPayUrl: (a) => 'https://sandbox.zarinpal.com/pg/StartPay/' + a, requestPayment: async (args) => ((requested = args), 'S' + '0'.repeat(35)) },
-    logger: () => {},
+for (const [city, rial, total, line] of [['کرج', 157000000, 15700000, FEE_LINE], ['تهران', 156000000, 15600000, TEHRAN_FEE_LINE]]) {
+  test(`online checkout from ${city}: ZarinPal is asked for ${rial} Rial; the order stores the fee line; a sent fee is ignored`, async () => {
+    const orders = [];
+    let requested;
+    const app = createApp({
+      config: { publicSiteUrl: 'https://glow-home.ir', callbackUrl: 'https://pay.glow-home.ir/api/verify', zarinpal: { mode: 'sandbox' } },
+      db: {
+        fetchProductsBySlugs: async () => [gisoo],
+        nextOrderCode: async () => 'GH-1020',
+        createOrder: async (o, items) => (orders.push({ ...o, items }), { id: 'o1', code: o.code }),
+        setAuthority: async () => {},
+        markFailed: async () => {},
+      },
+      zarinpal: { startPayUrl: (a) => 'https://sandbox.zarinpal.com/pg/StartPay/' + a, requestPayment: async (args) => ((requested = args), 'S' + '0'.repeat(35)) },
+      logger: () => {},
+    });
+    const server = app.listen(0, '127.0.0.1');
+    servers.push(server);
+    await new Promise((r) => server.once('listening', r));
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/api/checkout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://glow-home.ir' },
+      body: JSON.stringify({
+        customer: { name: 'سارا', phone: '+989121234567', city, address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' },
+        items: CART,
+        packaging_fee: 0, // ignored
+        fees: [], // ignored
+        total: 1, // ignored
+      }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(requested.amount, rial);
+    assert.equal(orders[0].total, total);
+    assert.equal(orders[0].payment_amount_rial, rial);
+    assert.equal(requested.amount, orders[0].total * 10, 'the bank amount is the order total');
+    assert.deepEqual(orders[0].items.at(-1), line);
+    assert.equal(orders[0].items.length, 2);
   });
-  const server = app.listen(0, '127.0.0.1');
-  servers.push(server);
-  await new Promise((r) => server.once('listening', r));
-  const res = await fetch(`http://127.0.0.1:${server.address().port}/api/checkout`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Origin: 'https://glow-home.ir' },
-    body: JSON.stringify({
-      customer: { name: 'سارا', phone: '+989121234567', city: 'کرج', address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' },
-      items: CART,
-      packaging_fee: 0, // ignored
-    }),
-  });
-  assert.equal(res.status, 200);
-  assert.equal(requested.amount, 157000000);
-  assert.equal(orders[0].total, 15700000);
-  assert.equal(orders[0].payment_amount_rial, 157000000);
-  assert.deepEqual(orders[0].items.at(-1), FEE_LINE);
-});
+}
 
 // ---- storefront ------------------------------------------------------------------------------
 
@@ -204,16 +239,19 @@ function storefront(city) {
   return { ...fns, state, nodes };
 }
 
-test('checkout summary: «هزینه بسته‌بندی ۲۵۰٬۰۰۰ تومان» outside Tehran only, in the total', () => {
+test('checkout summary: «هزینه بسته‌بندی» ۱۵۰٬۰۰۰ in Tehran, ۲۵۰٬۰۰۰ elsewhere, in the total; none before a city', () => {
   const out = storefront('اصفهان');
   const t = out.totals();
   assert.equal(t.total, 15700000);
   assert.equal(out.feeRowsHtml(t), '<div class="sum-row"><span>هزینه بسته‌بندی</span><span>۲۵۰٬۰۰۰ تومان</span></div>');
-  for (const city of ['تهران', 'Tehran', '']) {
+  for (const city of ['تهران', 'Tehran', 'تهران‌', 'شهر تهران']) {
     const sf = storefront(city);
-    assert.equal(sf.totals().total, 15450000, city);
-    assert.equal(sf.feeRowsHtml(sf.totals()), '', city); // empty city: no line until a city is chosen
+    assert.equal(sf.totals().total, 15600000, city);
+    assert.equal(sf.feeRowsHtml(sf.totals()), '<div class="sum-row"><span>هزینه بسته‌بندی</span><span>۱۵۰٬۰۰۰ تومان</span></div>', city);
   }
+  const none = storefront('');
+  assert.equal(none.totals().total, 15450000);
+  assert.equal(none.feeRowsHtml(none.totals()), '', 'empty city: no line until a city is chosen');
 });
 
 test('typing the city updates the summary in place (fee rows, totals) — the form is never re-rendered', () => {
@@ -223,6 +261,14 @@ test('typing the city updates the summary in place (fee rows, totals) — the fo
   assert.match(sf.nodes.fees[0].innerHTML, /هزینه بسته‌بندی/);
   assert.deepEqual(sf.nodes.total.map((n) => n.textContent), ['۱۵٬۷۰۰٬۰۰۰ تومان', '۱۵٬۷۰۰٬۰۰۰ تومان']);
   sf.state.form.city = 'تهران';
+  sf.refreshSummaryTotals();
+  assert.match(sf.nodes.fees[0].innerHTML, /<span>هزینه بسته‌بندی<\/span><span>۱۵۰٬۰۰۰ تومان<\/span>/);
+  assert.deepEqual(sf.nodes.total.map((n) => n.textContent), ['۱۵٬۶۰۰٬۰۰۰ تومان', '۱۵٬۶۰۰٬۰۰۰ تومان']);
+  sf.state.form.city = 'كرج'; // Arabic ك: still another city
+  sf.refreshSummaryTotals();
+  assert.match(sf.nodes.fees[0].innerHTML, /۲۵۰٬۰۰۰ تومان/);
+  assert.deepEqual(sf.nodes.total.map((n) => n.textContent), ['۱۵٬۷۰۰٬۰۰۰ تومان', '۱۵٬۷۰۰٬۰۰۰ تومان']);
+  sf.state.form.city = '';
   sf.refreshSummaryTotals();
   assert.equal(sf.nodes.fees[0].innerHTML, '');
 

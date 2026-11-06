@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { LIMITS, priceCart, validateCheckoutBody } from '../src/pricing.js';
+import { LIMITS, TEHRAN_PACKAGING_FEE_TOMAN, priceCart, validateCheckoutBody } from '../src/pricing.js';
 
 const customer = { name: 'سارا', phone: '+989121234567', city: 'تهران', address: 'خیابان ولیعصر، کوچه ۱۲، پلاک ۳', postcode: '' };
 const body = (over = {}) => ({ customer, items: [{ cartKey: 'lamp-a', qty: 1 }], ...over });
@@ -46,7 +46,8 @@ test('prices from DB with variant, color, discount; shipping never charged', () 
   });
   assert.equal(r.subtotal, 1500000 * 2 + 1000000);
   assert.equal(r.discount, Math.round(4000000 * 0.15));
-  assert.equal(r.total, 4000000 - 600000);
+  // the discount is on the products only; the Tehran packaging fee comes on top
+  assert.equal(r.total, 4000000 - 600000 + TEHRAN_PACKAGING_FEE_TOMAN);
   assert.equal(r.shippingMethod, 'peyk');
   assert.equal(r.shippingCost, 90000);
   assert.equal(r.orderItems[0].name_fa, 'آباژور الف (140 سانتی‌متر) — آبی');

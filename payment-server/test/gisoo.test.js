@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { SHADE_TYPES, priceCart, validateCheckoutBody } from '../src/pricing.js';
+import { SHADE_TYPES, TEHRAN_PACKAGING_FEE_TOMAN, priceCart, validateCheckoutBody } from '../src/pricing.js';
 import { tomanToGatewayAmount } from '../src/config.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -60,8 +60,8 @@ for (const [h, shade, toman] of PRICES) {
     const r = price(key);
     assert.equal(r.error, undefined);
     assert.equal(r.orderItems[0].unit_price, toman);
-    assert.equal(r.total, toman);
-    assert.equal(tomanToGatewayAmount(r.total), toman * 10);
+    assert.equal(r.total, toman + TEHRAN_PACKAGING_FEE_TOMAN); // + the Tehran packaging fee
+    assert.equal(tomanToGatewayAmount(r.total), (toman + TEHRAN_PACKAGING_FEE_TOMAN) * 10);
     assert.equal(r.orderItems[0].name_fa, `گیسو (${h.slice(1)} سانتی‌متر) — ${SHADE_TYPES[shade]}`);
     // api/orders.js gives the same price and label.
     assert.deepEqual(ordersLine(key), { price: toman, label: r.orderItems[0].name_fa });
@@ -75,7 +75,7 @@ test('same lamp with two shade types = two separate lines', () => {
     discountCode: null,
     city: 'تهران',
   });
-  assert.equal(r.orderItems.length, 2);
+  assert.equal(r.orderItems.filter((it) => it.product_id != null).length, 2);
   assert.equal(r.subtotal, 12980000 + 2 * 15450000);
 });
 
@@ -111,8 +111,8 @@ test('a tampered client price is ignored: the price comes from the DB only', () 
   assert.equal(v.error, undefined);
   assert.deepEqual(v.value.items, [{ cartKey: 'gisoo::h140::sembroidered', qty: 1 }]);
   const r = priceCart({ items: v.value.items, products, discountCode: null, city: 'تهران' });
-  assert.equal(r.total, 15450000);
-  assert.equal(tomanToGatewayAmount(r.total), 154500000);
+  assert.equal(r.total, 15450000 + TEHRAN_PACKAGING_FEE_TOMAN);
+  assert.equal(tomanToGatewayAmount(r.total), 154500000 + TEHRAN_PACKAGING_FEE_TOMAN * 10);
   // A shade price smuggled into the cart key is not a stored option either.
   assert.ok(price('gisoo::h140::s1000').error);
 });
@@ -126,8 +126,8 @@ test('a broken stored shade price is never charged as free', () => {
 });
 
 test('products without shade types: priced by size, shade part ignored', () => {
-  assert.equal(price('lamp-a::h140').total, 1500000);
-  assert.equal(price('lamp-a::h140::sembroidered').total, 1500000); // shade part ignored
+  assert.equal(price('lamp-a::h140').total, 1500000 + TEHRAN_PACKAGING_FEE_TOMAN);
+  assert.equal(price('lamp-a::h140::sembroidered').total, 1500000 + TEHRAN_PACKAGING_FEE_TOMAN); // shade part ignored
   // An unknown height used to fall back to the base price; it is rejected
   // since sizes became strict (see test/base-size.test.js).
   assert.match(price('lamp-a::h999').error, /دیگر معتبر نیست/);

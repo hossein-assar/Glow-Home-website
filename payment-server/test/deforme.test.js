@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { SHADE_TYPES, priceCart, validateCheckoutBody } from '../src/pricing.js';
+import { SHADE_TYPES, TEHRAN_PACKAGING_FEE_TOMAN, priceCart, validateCheckoutBody } from '../src/pricing.js';
 import { tomanToGatewayAmount } from '../src/config.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -79,8 +79,8 @@ for (const [h, shade, toman] of PRICES) {
     const r = price(key);
     assert.equal(r.error, undefined);
     assert.equal(r.orderItems[0].unit_price, toman);
-    assert.equal(r.total, toman);
-    assert.equal(tomanToGatewayAmount(r.total), toman * 10);
+    assert.equal(r.total, toman + TEHRAN_PACKAGING_FEE_TOMAN); // + the Tehran packaging fee
+    assert.equal(tomanToGatewayAmount(r.total), (toman + TEHRAN_PACKAGING_FEE_TOMAN) * 10);
     assert.equal(r.orderItems[0].name_fa, `دفرمه (${h.slice(1)} سانتی‌متر) — ${SHADE_TYPES[shade]}`);
     assert.deepEqual(ordersLine(deforme, key), { price: toman, label: r.orderItems[0].name_fa });
   });
@@ -100,8 +100,8 @@ test('gisoo rejects the macrame shade (deforme-only), and still prices its own',
     assert.equal(price(key).error, staleError('گیسو'), key);
     assert.equal(ordersLine(gisoo, key).error, staleError('گیسو'), key);
   }
-  assert.equal(price('gisoo::h140::sembroidered').total, 15450000);
-  assert.equal(price('gisoo::h100::splain').total, 9100000);
+  assert.equal(price('gisoo::h140::sembroidered').total, 15450000 + TEHRAN_PACKAGING_FEE_TOMAN);
+  assert.equal(price('gisoo::h100::splain').total, 9100000 + TEHRAN_PACKAGING_FEE_TOMAN);
 });
 
 test('old deforme cart keys (no shade type, removed sizes) are rejected with a Persian error', () => {
@@ -131,8 +131,8 @@ test('a tampered client price for deforme is ignored: the price comes from the D
   assert.equal(v.error, undefined);
   assert.deepEqual(v.value.items, [{ cartKey: 'deforme::h140::smacrame', qty: 1 }]);
   const r = priceCart({ items: v.value.items, products, discountCode: null, city: 'تهران' });
-  assert.equal(r.total, 13500000);
-  assert.equal(tomanToGatewayAmount(r.total), 135000000);
+  assert.equal(r.total, 13500000 + TEHRAN_PACKAGING_FEE_TOMAN);
+  assert.equal(tomanToGatewayAmount(r.total), 135000000 + TEHRAN_PACKAGING_FEE_TOMAN * 10);
 });
 
 test('admin shows one row per shade found in the product data, with its price for every size', () => {

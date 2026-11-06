@@ -112,10 +112,15 @@ test('checkout re-prices, creates pending_payment order, returns StartPay url (R
   assert.equal(res.headers.get('access-control-allow-origin'), 'https://glow-home.ir');
   assert.equal(json.url, 'https://sandbox.zarinpal.com/pg/StartPay/S' + '1'.padStart(35, '0'));
   assert.equal(orders[0].status, 'pending_payment');
-  assert.equal(orders[0].total, 2000000); // 2 × 1,000,000, no discount, shipping not charged
+  assert.equal(orders[0].total, 2150000); // 2 × 1,000,000 + the Tehran packaging fee 150,000; no discount, shipping not charged
   assert.equal(orders[0].discount_code, null);
-  assert.equal(orders[0].payment_amount_rial, 20000000);
-  assert.equal(zp.calls.request[0].amount, 20000000);
+  assert.equal(orders[0].payment_amount_rial, 21500000);
+  assert.equal(zp.calls.request[0].amount, 21500000);
+  // the fee is its own order line (no product), the products line unchanged
+  assert.deepEqual(items.map((i) => [i.product_id, i.name_fa, i.qty, i.unit_price]), [
+    ['p1', 'آباژور الف', 2, 1000000],
+    [null, 'هزینه بسته‌بندی', 1, 150000],
+  ]);
   assert.equal(zp.calls.request[0].callbackUrl, 'https://pay.example.ir/api/verify');
   assert.equal(orders[0].payment_authority, 'S' + '1'.padStart(35, '0'));
 });
@@ -138,9 +143,9 @@ test('gisoo: tampered client price ignored, shade price from DB charged in Rial;
   const body = { ...goodBody, discount_code: '', items: [{ cartKey: 'gisoo::h140::sembroidered', qty: 1, price: 1000 }] };
   const res = await checkout(body);
   assert.equal(res.status, 200);
-  assert.equal(orders[0].total, 15450000);
-  assert.equal(orders[0].payment_amount_rial, 154500000);
-  assert.equal(zp.calls.request[0].amount, 154500000);
+  assert.equal(orders[0].total, 15600000); // + the Tehran packaging fee
+  assert.equal(orders[0].payment_amount_rial, 156000000);
+  assert.equal(zp.calls.request[0].amount, 156000000);
   assert.equal(items[0].unit_price, 15450000);
   assert.equal(items[0].name_fa, 'گیسو (140 سانتی‌متر) — شید گلدوزی');
 
@@ -198,7 +203,7 @@ test('verify OK → paid, then repeated callback is idempotent', async () => {
   assert.equal(orders[0].status, 'paid');
   assert.equal(orders[0].payment_ref_id, '201');
   assert.equal(orders[0].payment_card_pan, '502229******5995');
-  assert.equal(zp.calls.verify[0].amount, 20000000); // stored total, in Rial
+  assert.equal(zp.calls.verify[0].amount, 21500000); // stored total (with the Tehran fee), in Rial
   const paidAt = orders[0].paid_at;
 
   const r2 = await verify(`Authority=${a}&Status=OK`);

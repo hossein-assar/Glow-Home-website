@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { SHADE_TYPES, priceCart, validateCheckoutBody } from '../src/pricing.js';
+import { SHADE_TYPES, TEHRAN_PACKAGING_FEE_TOMAN, priceCart, validateCheckoutBody } from '../src/pricing.js';
 import { tomanToGatewayAmount } from '../src/config.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -60,12 +60,12 @@ for (const [shade, toman, rial] of [['plain', 6500000, 65000000], ['embroidered'
     const r = price(key);
     assert.equal(r.error, undefined);
     assert.equal(r.orderItems[0].unit_price, toman);
-    assert.equal(r.total, toman);
-    assert.equal(tomanToGatewayAmount(r.total), rial);
+    assert.equal(r.total, toman + TEHRAN_PACKAGING_FEE_TOMAN); // + the Tehran packaging fee
+    assert.equal(tomanToGatewayAmount(r.total), rial + TEHRAN_PACKAGING_FEE_TOMAN * 10);
     assert.equal(r.orderItems[0].name_fa, `نیلا (40 سانتی‌متر) — ${SHADE_TYPES[shade]}`);
     assert.deepEqual(ordersLine(key), { price: toman, label: r.orderItems[0].name_fa });
     // quantity multiplies the DB price
-    assert.equal(price(key, 3).total, toman * 3);
+    assert.equal(price(key, 3).total, toman * 3 + TEHRAN_PACKAGING_FEE_TOMAN); // the fee once per order, not per item
   });
 }
 
@@ -76,8 +76,8 @@ test('both shades together in one cart', () => {
     discountCode: null,
     city: 'تهران',
   });
-  assert.equal(r.total, 6500000 + 2 * 8900000);
-  assert.equal(tomanToGatewayAmount(r.total), 243000000);
+  assert.equal(r.total, 6500000 + 2 * 8900000 + TEHRAN_PACKAGING_FEE_TOMAN);
+  assert.equal(tomanToGatewayAmount(r.total), 243000000 + TEHRAN_PACKAGING_FEE_TOMAN * 10);
 });
 
 test('old and unknown nila keys are rejected with the Persian error, in both servers', () => {
@@ -98,8 +98,8 @@ test('a tampered client price for nila is ignored: the price comes from the DB o
   assert.equal(v.error, undefined);
   assert.deepEqual(v.value.items, [{ cartKey: 'nila::h40::sembroidered', qty: 1 }]);
   const r = priceCart({ items: v.value.items, products, discountCode: null, city: 'تهران' });
-  assert.equal(r.total, 8900000);
-  assert.equal(tomanToGatewayAmount(r.total), 89000000);
+  assert.equal(r.total, 8900000 + TEHRAN_PACKAGING_FEE_TOMAN);
+  assert.equal(tomanToGatewayAmount(r.total), 89000000 + TEHRAN_PACKAGING_FEE_TOMAN * 10);
 });
 
 test('shade labels are the same in app.js, api/orders.js, payment-server and admin', () => {

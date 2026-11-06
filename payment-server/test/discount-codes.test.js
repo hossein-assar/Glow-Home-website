@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { DISCOUNT_CODES, priceCart } from '../src/pricing.js';
+import { DISCOUNT_CODES, TEHRAN_PACKAGING_FEE_TOMAN, priceCart } from '../src/pricing.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const CODES = ['GLOW10', 'HANDMADE15', 'glow10', 'NOPE', 'constructor', '__proto__', 'toString', ''];
@@ -24,7 +24,7 @@ test('no discount codes are defined anywhere', () => {
 
 test('payment-server: with no codes defined, any code is rejected and the total is unchanged', () => {
   const plain = priceCart({ items: [{ cartKey: 'lamp-a', qty: 2 }], products: [product], discountCode: null, city: 'تهران' });
-  assert.equal(plain.total, 2000000);
+  assert.equal(plain.total, 2000000 + TEHRAN_PACKAGING_FEE_TOMAN);
   for (const code of CODES) {
     const r = priceCart({ items: [{ cartKey: 'lamp-a', qty: 2 }], products: [product], discountCode: code, city: 'تهران' });
     assert.equal(r.discount, 0, code);

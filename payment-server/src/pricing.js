@@ -65,13 +65,15 @@ export function normalizePersianText(s) {
 // ---- City fees (shared rule) -------------------------------------------------
 // ⚠ This block is identical in app.js, api/orders.js and
 // payment-server/src/pricing.js (`npm test` in payment-server/ checks it).
-// Amounts in Toman. Outside Tehran every order carries the packaging fee, on
-// the bill (the free-shipping threshold never waives it); delivery itself
-// stays pay-at-door. Each fee is stored as its own order line (order_items,
-// no product). Outside Tehran the courier is always Tipax, so
+// Amounts in Toman. Every order carries the packaging fee, on the bill:
+// TEHRAN_PACKAGING_FEE_TOMAN in Tehran, PACKAGING_FEE_TOMAN everywhere else
+// (the free-shipping threshold never waives either); delivery itself stays
+// pay-at-door. Each fee is stored as its own order line (order_items, no
+// product). Outside Tehran the courier is always Tipax, so
 // TIPAX_EXTRA_FEE_TOMAN applies to the same orders — it is OFF (0) until
 // confirmed; a fee of 0 adds no line.
 export const PACKAGING_FEE_TOMAN = 250000;
+export const TEHRAN_PACKAGING_FEE_TOMAN = 150000;
 export const TIPAX_EXTRA_FEE_TOMAN = 0;
 export const PACKAGING_FEE_LABEL = 'هزینه بسته‌بندی';
 export const TIPAX_EXTRA_FEE_LABEL = 'هزینه اضافه تیپاکس';
@@ -85,12 +87,16 @@ export function isTehranCity(rawCity) {
   return TEHRAN_NAMES.includes(city.split(/\s*[-–—,،(/]\s*/)[0].trim());
 }
 
-/** The fees a city adds to the bill, as [{ label, amount }]. None for
- * Tehran, and none for an empty city (both servers reject an empty city). */
+/** The fees a city adds to the bill, as [{ label, amount }]: the packaging
+ * fee (Tehran's or everywhere else's) and, outside Tehran, the Tipax extra.
+ * None for an empty city (both servers reject an empty city). */
 export function cityFees(rawCity) {
-  if (!normalizePersianText(rawCity) || isTehranCity(rawCity)) return [];
-  const fees = [{ label: PACKAGING_FEE_LABEL, amount: PACKAGING_FEE_TOMAN }];
-  if (TIPAX_EXTRA_FEE_TOMAN > 0) fees.push({ label: TIPAX_EXTRA_FEE_LABEL, amount: TIPAX_EXTRA_FEE_TOMAN });
+  if (!normalizePersianText(rawCity)) return [];
+  const tehran = isTehranCity(rawCity);
+  const fees = [];
+  const packaging = tehran ? TEHRAN_PACKAGING_FEE_TOMAN : PACKAGING_FEE_TOMAN;
+  if (packaging > 0) fees.push({ label: PACKAGING_FEE_LABEL, amount: packaging });
+  if (!tehran && TIPAX_EXTRA_FEE_TOMAN > 0) fees.push({ label: TIPAX_EXTRA_FEE_LABEL, amount: TIPAX_EXTRA_FEE_TOMAN });
   return fees;
 }
 // ---- end of city fees ----------------------------------------------------------
@@ -309,7 +315,7 @@ export function priceCart({ items, products, discountCode, city, codes = DISCOUN
   const freeShip = !method.payAtDoor && base >= FREE_SHIP_OVER;
   const shipCost = method.payAtDoor || freeShip ? 0 : method.cost;
 
-  // City fees (packaging outside Tehran) from the city alone — nothing the
+  // City fees (packaging, Tehran's or the rest's) from the city alone — nothing the
   // client sends about fees is read. Each is stored as its own order line,
   // and is part of the total sent to ZarinPal.
   const fees = cityFees(city);
