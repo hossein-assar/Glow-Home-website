@@ -137,7 +137,7 @@ test('a key with no height is the base size, as before', () => {
 });
 
 test('the payment server reads height_cm with the product', () => {
-  assert.match(dbJs, /\.select\('id, slug, name_fa, price, height_cm, variants, colors, in_stock'\)/);
+  assert.match(dbJs, /\.select\('id, slug, name_fa, price, height_cm, variants, shade_types, colors, in_stock'\)/);
 });
 
 test('shade-type products are unchanged: strict shade keys, no base size added', () => {
@@ -165,7 +165,7 @@ function storefront(state) {
   const code = [
     fnSrc(appJs, 'parseCartKey'),
     grab(appJs, /const SHADE_TYPES = [^\n]*\n/),
-    ...['hasShadeTypes', 'shadeOption', 'cartLineData', 'cartKeyFor', 'cardCartKey', 'addToCart', 'screenProduct'].map((n) => fnSrc(appJs, n)),
+    ...['hasShadeTypes', 'shadeTypesOf', 'sizeShadesOf', 'defaultShade', 'shadeOption', 'cartLineData', 'cartKeyFor', 'cardCartKey', 'addToCart', 'screenProduct'].map((n) => fnSrc(appJs, n)),
     'return { cartKeyFor, cardCartKey, cartLineData, addToCart, screenProduct };',
   ].join('\n');
   const fns = new Function(
@@ -250,7 +250,9 @@ function adminEnv(cached, { fHeight = cached.height_cm ?? '', priceBox = cached.
     },
   };
   const document = {
-    getElementById: (id) => (id === `variants-list-${cached.id}` ? list : (els[id] ||= { value: '', textContent: '', className: '' })),
+    // the shade block's lists exist only while the form has shades (none here)
+    getElementById: (id) =>
+      id === `variants-list-${cached.id}` ? list : /^sh-(list|sizes)-/.test(id) ? null : (els[id] ||= { value: '', textContent: '', className: '' }),
     querySelectorAll: (sel) => (sel === `#variants-list-${cached.id} .variant-row:not([data-base])` ? rows.filter((r) => !r.base).map(rowEl) : []),
   };
   els[`f-name-fa-${cached.id}`] = { value: cached.name_fa };
@@ -268,10 +270,10 @@ function adminEnv(cached, { fHeight = cached.height_cm ?? '', priceBox = cached.
       grab(adminJs, /const STYLE_OPTIONS = [^\n]*\n/),
       grab(adminJs, /const hasShadeTypes = [\s\S]*?;\n/),
       grab(adminJs, /const SHADE_TYPES = [^\n]*\n/),
-      grab(adminJs, /const shadeKeysOf = [\s\S]*?;\n/),
+      grab(adminJs, /const SHADE_NAME_MAX = [^\n]*\n/),
       grab(adminJs, /const photoUploads = [^\n]*\n/),
       ...['escapeHtml', 'escapeAttr', 'toLatinDigits', 'unformatPrice', 'formatPrice', 'mainPhoto', 'mainPhotoFields',
-        'withBaseSize', 'baseSizeOf', 'sizesToSave', 'syncBaseRow', 'baseRowHtml', 'variantRowHtml', 'shadeVariantRowHtml',
+        'withBaseSize', 'baseSizeOf', 'sizesToSave', 'syncBaseRow', 'baseRowHtml', 'variantRowHtml', 'shadeTypesOf', 'shadeModelOf', 'plainSizesBlockHtml', 'shadeBlockHtml', 'readShadeBlock', 'shadeFormToSave', 'shadesNeedMigration', 'faNum',
         'editPanelHtml', 'saveProduct', 'saveProductFull'].map((n) => fnSrc(adminJs, n)),
       'const photoFieldHtml = () => "";',
       'return { editPanelHtml, syncBaseRow, saveProduct, saveProductFull };',
@@ -407,7 +409,9 @@ test('admin: shade-type products keep their own rows, no base row', async () => 
   const env = adminEnv({ ...nila, photo_url: 'images/x.jpg' });
   const html = env.open();
   assert.doesNotMatch(html, /data-base/);
-  assert.match(html, /data-shade="embroidered" value="8,900,000"/);
+  // the «شیدها» block instead: one row per shade, with its price for the one size
+  assert.match(html, /<div class="shade-row" data-key="embroidered">[\s\S]*?class="s-price price-input" data-idx="0"[^>]*value="8,900,000"/);
+  assert.doesNotMatch(html, /id="variants-list-/);
   env.syncBaseRow('n1');
   assert.ok(env.rows.every((r) => !r.base));
   // Quick save does not touch a shade product's sizes.
@@ -419,6 +423,6 @@ test('admin: shade-type products keep their own rows, no base row', async () => 
 test('admin: the base row follows ارتفاع پایه and the price box through one delegated listener', () => {
   assert.match(adminJs, /document\.addEventListener\('input', \(e\) => \{\n\s*const m = \/\^\(\?:f-height\|price\)-\(\.\+\)\$\/\.exec/);
   assert.match(adminJs, /if \(m\) syncBaseRow\(m\[1\]\);/);
-  assert.match(adminJs, /syncBaseRow\(id\);\n\s*wireVariantRemove\(list, \(\) => syncBaseRow\(id\)\);/);
+  assert.match(adminJs, /syncBaseRow\(id\);\n\s*wireVariantRemove\(plainList, \(\) => syncBaseRow\(id\)\);/);
   assert.match(adminJs, /\.variant-row:not\(\[data-base\]\)`\);/); // the full save never reads the read-only row
 });

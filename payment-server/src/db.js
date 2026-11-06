@@ -102,7 +102,7 @@ export function createDb({
       return retry(async (signal) => {
         const { data, error } = await sb
           .from('products')
-          .select('id, slug, name_fa, price, height_cm, variants, colors, in_stock')
+          .select('id, slug, name_fa, price, height_cm, variants, shade_types, colors, in_stock')
           .in('slug', slugs)
           .abortSignal(signal);
         check(error, 'fetch products');

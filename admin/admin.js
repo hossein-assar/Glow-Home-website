@@ -109,12 +109,13 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
    Each row has a quick-edit strip (price / provisional / in stock — the
    things you change often) plus a "ویرایش کامل" toggle that reveals every
    other field (subcategory, style, material, height, description, colors,
-   size variants). Colors are a plain comma-separated list. Variants are a
-   small repeatable height+price list, stored as the same [{height,price}]
-   shape the storefront's size picker already reads. A product whose sizes
-   are also priced by shade type (گیسو, دفرمه — see supabase/migration-*-shades.sql)
-   gets one price per shade type found in its data instead, stored as
-   {height, price: <plain>, shades: {plain, embroidered | macrame}}. */
+   size variants, shades). Colors are a plain comma-separated list. Variants
+   are a small repeatable height+price list, stored as the same
+   [{height,price}] shape the storefront's size picker already reads.
+   A product with shades («شیدها») lists them in products.shade_types
+   ({key, name_fa, name_en, in_stock}, in display order — see
+   supabase/migration-shade-types.sql) and each size stores the FULL price
+   per shade: {height, price: <first shade>, shades: {<key>: price, …}}. */
 
 const COLLECTION_LABEL = { lamps: 'آباژور', shades: 'شید', candles: 'شمع', decor: 'اکسسوری منزل' };
 const STYLE_OPTIONS = ['', 'رومیزی', 'کنار سالنی'];
@@ -122,13 +123,105 @@ const STYLE_OPTIONS = ['', 'رومیزی', 'کنار سالنی'];
 const hasShadeTypes = (p) =>
   Array.isArray(p.variants) && p.variants.some((v) => v && v.shades && typeof v.shades === 'object');
 
-// Same labels as SHADE_TYPES in app.js, api/orders.js and payment-server.
+// The original three shade types: only the fallback for a row whose
+// shade_types is still empty (same in app.js, api/orders.js, payment-server).
 const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوزی', macrame: 'شید مکرومه' };
 
-// The shade types a product's sizes are priced by, in SHADE_TYPES order
-// (plain first): gisoo → plain, embroidered; deforme → plain, macrame.
-const shadeKeysOf = (p) =>
-  Object.keys(SHADE_TYPES).filter((k) => p.variants.some((v) => v && v.shades && Object.hasOwn(v.shades, k)));
+// ⚠ Same function in app.js, api/orders.js and payment-server/src/pricing.js.
+function shadeTypesOf(p) {
+  const stored = Array.isArray(p.shade_types) ? p.shade_types : [];
+  if (stored.length) {
+    return stored
+      .filter((t) => t && typeof t.key === 'string' && /^[a-z][a-z0-9]{0,31}$/.test(t.key) && String(t.name_fa ?? '').trim())
+      .map((t) => ({ key: t.key, name_fa: String(t.name_fa).trim(), name_en: String(t.name_en ?? '').trim(), in_stock: t.in_stock !== false }));
+  }
+  const variants = Array.isArray(p.variants) ? p.variants : [];
+  return Object.keys(SHADE_TYPES)
+    .filter((k) => variants.some((v) => v && v.shades && typeof v.shades === 'object' && Object.hasOwn(v.shades, k)))
+    .map((k) => ({ key: k, name_fa: SHADE_TYPES[k], name_en: '', in_stock: true }));
+}
+
+/* ---- Shades («شیدها») -----------------------------------------------------
+   A product with shades shows its sizes as heights only, and one row per
+   shade: Persian name (required), English name (optional), «موجود», and
+   one FULL price per size (a one-size product has one «قیمت»). Adding the
+   first shade to a product with plain sizes turns those sizes into shade
+   prices (pre-filled with today's prices); deleting the last shade turns
+   them back. The key never changes once made — cart keys use it — so a
+   rename never breaks a cart; orders keep their own copy of the name and
+   price (order_items), so no edit here ever changes an old order. */
+
+const SHADE_NAME_MAX = 40;
+
+/** A new shade key, unlike any in `taken`: "k" + 6 base-36 characters. */
+function newShadeKey(taken) {
+  let key;
+  do key = 'k' + Math.random().toString(36).slice(2, 8).padEnd(6, '0');
+  while (taken.includes(key));
+  return key;
+}
+
+/** What «ذخیره همه» writes for a product with shades, from the form as
+ * typed. sizes: the heights, one per size row. shades: [{ key, name_fa,
+ * name_en, in_stock, prices: [one per size, same order] }]. baseHeight:
+ * «ارتفاع پایه». Returns { variants, shade_types, price } — price is the
+ * base size with the first shade, like `price` on each size — or { error }
+ * in Persian. */
+function shadeFormToSave({ sizes, shades, baseHeight }) {
+  const num = (v) => {
+    const t = String(toLatinDigits(v ?? '')).trim();
+    return t === '' ? NaN : Number(t);
+  };
+  const heights = [];
+  for (const raw of sizes) {
+    const h = num(raw);
+    if (!Number.isSafeInteger(h) || h <= 0) return { error: 'خطا: ارتفاع هر اندازه را به سانتی‌متر (عدد صحیح بزرگ‌تر از صفر) وارد کنید.' };
+    if (heights.includes(h)) return { error: `خطا: اندازه‌ی ${h} سانتی‌متر دو بار آمده است. یکی را حذف کنید.` };
+    heights.push(h);
+  }
+  if (!heights.length) return { error: 'خطا: دست‌کم یک اندازه لازم است.' };
+  const base = num(baseHeight);
+  if (!heights.includes(base)) return { error: 'خطا: «ارتفاع پایه» باید یکی از اندازه‌ها باشد.' };
+  if (!shades.length) return { error: 'خطا: دست‌کم یک شید لازم است.' };
+
+  const sameName = (n) => n.replace(/[\u200c\u200e\u200f]/g, '').replace(/[يى]/g, 'ی').replace(/ك/g, 'ک').toLowerCase();
+  const names = new Set();
+  const keys = new Set();
+  const shade_types = [];
+  const prices = heights.map(() => ({}));
+  for (const [n, s] of shades.entries()) {
+    const name = String(s.name_fa ?? '').trim().replace(/\s+/g, ' ');
+    if (!name) return { error: `خطا: نام فارسی شید ردیف ${faNum(n + 1)} را وارد کنید.` };
+    if (name.length > SHADE_NAME_MAX) return { error: `خطا: نام شید «${name}» بیش از ${faNum(SHADE_NAME_MAX)} حرف است.` };
+    if (names.has(sameName(name))) return { error: `خطا: شید «${name}» دو بار آمده است. نام هر شید باید متفاوت باشد.` };
+    names.add(sameName(name));
+    if (typeof s.key !== 'string' || !/^[a-z][a-z0-9]{0,31}$/.test(s.key) || keys.has(s.key)) {
+      return { error: 'خطا: شناسه‌ی یکی از شیدها نامعتبر است. صفحه را دوباره باز کنید.' };
+    }
+    keys.add(s.key);
+    for (const [i, h] of heights.entries()) {
+      const price = num(unformatPrice(s.prices[i] ?? ''));
+      if (!Number.isSafeInteger(price) || price <= 0) {
+        return { error: `خطا: قیمت شید «${name}» برای اندازه‌ی ${h} سانتی‌متر را به تومان (عدد صحیح بزرگ‌تر از صفر) وارد کنید.` };
+      }
+      prices[i][s.key] = price;
+    }
+    const name_en = String(s.name_en ?? '').trim().replace(/\s+/g, ' ');
+    if (name_en.length > SHADE_NAME_MAX) return { error: `خطا: نام انگلیسی شید «${name}» بیش از ${faNum(SHADE_NAME_MAX)} حرف است.` };
+    shade_types.push({ key: s.key, name_fa: name, name_en, in_stock: !!s.in_stock });
+  }
+  const first = shade_types[0].key;
+  const variants = heights.map((h, i) => ({ height: h, price: prices[i][first], shades: prices[i] }));
+  return { variants, shade_types, price: variants[heights.indexOf(base)].price };
+}
+
+/** Before supabase/migration-shade-types.sql has run (no shade_types column
+ * on the row) only the original three, unchanged, can be saved: their
+ * prices still work through the fallback, a new or renamed shade would not. */
+function shadesNeedMigration(row, shade_types) {
+  if (row && 'shade_types' in row) return false;
+  return !shade_types.every((t) => Object.hasOwn(SHADE_TYPES, t.key) && t.name_fa === SHADE_TYPES[t.key] && t.in_stock && !t.name_en);
+}
 
 /* ---- Price inputs --------------------------------------------------------
    Every price box is a text input (class "price-input") that shows thousands
@@ -234,12 +327,12 @@ document.addEventListener('input', (e) => {
 });
 
 /** Adds, updates or removes the base-size row so it always matches the two
- * fields above it. No-op for shade-type products or a closed panel. */
+ * fields above it. No-op while the form has shades, or a closed panel. */
 function syncBaseRow(id) {
   const list = document.getElementById(`variants-list-${id}`);
   const heightInput = document.getElementById(`f-height-${id}`);
   const p = PRODUCTS_CACHE.find((x) => x.id === id);
-  if (!list || !heightInput || !p || hasShadeTypes(p)) return;
+  if (!list || !heightInput || !p) return; // the list exists only without shades
   const others = list.querySelectorAll('.variant-row:not([data-base])').length;
   const base = baseSizeOf(heightInput.value, document.getElementById(`price-${id}`).value, others);
   const row = list.querySelector('.variant-row[data-base]');
@@ -575,18 +668,13 @@ function rowHtml(p) {
     </tr>
     <tr id="edit-wrap-${p.id}" style="display:none">
       <td colspan="7" style="padding:0; border:0">
-        <div id="edit-panel-${p.id}"></div>
+        <div class="edit-panel" id="edit-panel-${p.id}"></div>
       </td>
     </tr>`;
 }
 
 function editPanelHtml(p) {
   const variants = Array.isArray(p.variants) ? p.variants : [];
-  const shadeKeys = hasShadeTypes(p) ? shadeKeysOf(p) : null;
-  // Without shade types: the base size first (see "Sizes" above), then the
-  // other sizes. A stored row at the base height IS the base row.
-  const otherSizes = shadeKeys ? variants : withBaseSize(variants, p.height_cm, p.price).filter((v) => v.height !== p.height_cm);
-  const baseSize = shadeKeys ? null : baseSizeOf(p.height_cm, p.price, otherSizes.length);
   const colors = Array.isArray(p.colors) ? p.colors.join('، ') : '';
   return `
     <tr class="edit-row" id="edit-row-${p.id}">
@@ -652,19 +740,11 @@ function editPanelHtml(p) {
             <input id="f-desc-${p.id}" value="${escapeAttr(p.description || '')}">
           </div>
         </div>
-        <div style="margin-top:14px">
-          <label>${
-            shadeKeys
-              ? 'اندازه‌ها و قیمت هر اندازه برای ' + shadeKeys.map((k) => SHADE_TYPES[k]).join(' و ') + ' (تومان)'
-              : 'اندازه‌ها و قیمت هر اندازه (در صورت وجود چند سایز)'
-          }</label>
-          <div id="variants-list-${p.id}">
-            ${baseSize ? baseRowHtml(baseSize.height, baseSize.price) : ''}${otherSizes
-              .map((v, i) => (shadeKeys ? shadeVariantRowHtml(i, shadeKeys, v) : variantRowHtml(p.id, i, v.height, v.price)))
-              .join('')}
-          </div>
-          <button class="link-btn" id="add-variant-${p.id}">+ افزودن اندازه</button>
-        </div>
+        <div id="sizes-block-${p.id}" style="margin-top:14px">${
+          hasShadeTypes(p)
+            ? shadeBlockHtml(p.id, shadeModelOf(p))
+            : plainSizesBlockHtml(p.id, variants, p.height_cm, p.price)
+        }</div>
         <div style="margin-top:16px">
           <button class="btn" id="save-full-${p.id}">ذخیره همه</button>
           <span id="save-full-msg-${p.id}" class="msg" style="display:inline-block"></span>
@@ -693,19 +773,205 @@ function variantRowHtml(pid, i, height, price) {
     </div>`;
 }
 
-function shadeVariantRowHtml(i, shadeKeys, v = {}) {
-  const sh = v.shades || {};
+/** A stored product with shades as the form's model (see shadeBlockHtml):
+ * its sizes in order, and each shade with its price per size ('' where a
+ * size has none — the form then asks for it). */
+function shadeModelOf(p) {
+  const sizes = (Array.isArray(p.variants) ? p.variants : []).filter((v) => v && v.shades && typeof v.shades === 'object');
+  return {
+    sizes: sizes.map((v) => String(v.height)),
+    shades: shadeTypesOf(p).map((t) => ({ ...t, prices: sizes.map((v) => (Object.hasOwn(v.shades, t.key) ? v.shades[t.key] : '')) })),
+  };
+}
+
+/** Sizes with a price each, for a product without shades (the base size
+ * first, read-only — see "Sizes" above), and the «شیدها» heading with its
+ * «+ افزودن شید» button. A stored row at the base height IS the base row. */
+function plainSizesBlockHtml(id, variants, baseHeight, basePrice) {
+  const otherSizes = withBaseSize(variants, baseHeight, basePrice).filter((v) => v.height !== baseHeight);
+  const baseSize = baseSizeOf(baseHeight, basePrice, otherSizes.length);
   return `
-    <div class="variant-row" data-idx="${i}">
-      <input type="number" placeholder="ارتفاع (سانتی‌متر)" class="v-height" value="${v.height ?? ''}">
-      ${shadeKeys
-        .map(
-          (k) =>
-            `<input type="text" inputmode="numeric" dir="ltr" placeholder="قیمت ${SHADE_TYPES[k]} (تومان)" class="v-shade-price price-input" data-shade="${k}" value="${formatPrice(sh[k])}">`
-        )
-        .join('')}
-      <button class="btn ghost remove-variant" type="button">حذف</button>
-    </div>`;
+          <label>اندازه‌ها و قیمت هر اندازه (در صورت وجود چند سایز)</label>
+          <div id="variants-list-${id}">
+            ${baseSize ? baseRowHtml(baseSize.height, baseSize.price) : ''}${otherSizes
+              .map((v, i) => variantRowHtml(id, i, v.height, v.price))
+              .join('')}
+          </div>
+          <button class="link-btn" id="add-variant-${id}" type="button">+ افزودن اندازه</button>
+          <div class="shades-head">
+            <label>شیدها</label>
+            <span class="hint">این محصول شید ندارد. با افزودن شید، برای هر شید (و هر اندازه) قیمت کامل جدا وارد می‌کنید.</span>
+          </div>
+          <button class="link-btn" id="add-shade-${id}" type="button">+ افزودن شید</button>`;
+}
+
+/** Sizes (heights only) and one row per shade with a full price per size.
+ * model: { sizes: [height as typed], shades: [{ key, name_fa, name_en,
+ * in_stock, prices: [one per size] }] }. Every value is escaped. */
+function shadeBlockHtml(id, model) {
+  const sizeLabel = (h) => (String(h).trim() ? `${escapeHtml(String(h).trim())} سانتی‌متر` : 'اندازه‌ی جدید');
+  return `
+          <label>اندازه‌ها (سانتی‌متر)</label>
+          <div id="sh-sizes-${id}">
+            ${model.sizes
+              .map(
+                (h, i) => `
+            <div class="variant-row sh-size-row" data-idx="${i}">
+              <input type="number" placeholder="ارتفاع (سانتی‌متر)" class="v-height" value="${escapeAttr(h)}">
+              <button class="btn ghost remove-size" type="button">حذف</button>
+            </div>`
+              )
+              .join('')}
+          </div>
+          <button class="link-btn" id="add-size-${id}" type="button">+ افزودن اندازه</button>
+          <div class="shades-head">
+            <label>شیدها</label>
+            <span class="hint">قیمت کامل محصول با هر شید، برای هر اندازه (تومان). حذف یا تغییر نام شید، سفارش‌های قبلی را تغییر نمی‌دهد.</span>
+          </div>
+          <div id="sh-list-${id}">
+            ${model.shades
+              .map(
+                (s) => `
+            <div class="shade-row" data-key="${escapeAttr(s.key)}">
+              <div class="shade-row-head">
+                <input class="s-name-fa" placeholder="نام شید (فارسی)" maxlength="${SHADE_NAME_MAX}" value="${escapeAttr(s.name_fa || '')}">
+                <input class="s-name-en" dir="ltr" placeholder="English name (اختیاری)" maxlength="${SHADE_NAME_MAX}" value="${escapeAttr(s.name_en || '')}">
+                <label class="s-stock"><input type="checkbox" class="s-in-stock" ${s.in_stock !== false ? 'checked' : ''}> موجود</label>
+                <button class="btn ghost remove-shade" type="button">حذف</button>
+              </div>
+              <div class="shade-prices">
+                ${model.sizes
+                  .map(
+                    (h, i) => `
+                <label class="s-price-cell" data-idx="${i}">
+                  <span>${model.sizes.length > 1 ? 'قیمت — ' + sizeLabel(h) : 'قیمت'}</span>
+                  <input type="text" inputmode="numeric" dir="ltr" class="s-price price-input" data-idx="${i}" placeholder="قیمت (تومان)" value="${formatPrice(s.prices[i] ?? '')}">
+                </label>`
+                  )
+                  .join('')}
+              </div>
+            </div>`
+              )
+              .join('')}
+          </div>
+          <button class="link-btn" id="add-shade-${id}" type="button">+ افزودن شید</button>`;
+}
+
+/** The shade block as typed, in the shape shadeBlockHtml() and
+ * shadeFormToSave() take. */
+function readShadeBlock(id) {
+  const sizes = [...document.querySelectorAll(`#sh-sizes-${id} .sh-size-row .v-height`)].map((i) => i.value);
+  const shades = [...document.querySelectorAll(`#sh-list-${id} .shade-row`)].map((row) => ({
+    key: row.dataset.key,
+    name_fa: row.querySelector('.s-name-fa').value,
+    name_en: row.querySelector('.s-name-en').value,
+    in_stock: row.querySelector('.s-in-stock').checked,
+    prices: sizes.map((_, i) => {
+      const input = row.querySelector(`.s-price[data-idx="${i}"]`);
+      return input ? input.value : '';
+    }),
+  }));
+  return { sizes, shades };
+}
+
+/** Re-draws the sizes/shades block and wires its buttons. */
+function renderSizesBlock(id, html) {
+  document.getElementById(`sizes-block-${id}`).innerHTML = html;
+  wireSizesBlock(id);
+}
+
+function wireSizesBlock(id) {
+  const msg = () => document.getElementById(`save-full-msg-${id}`);
+  const plainList = document.getElementById(`variants-list-${id}`);
+  if (plainList) {
+    // No shades: sizes with a price each, as before.
+    document.getElementById(`add-variant-${id}`).addEventListener('click', () => {
+      plainList.insertAdjacentHTML('beforeend', variantRowHtml(id, plainList.children.length, '', ''));
+      // The first added size brings the base size in with it, as row one.
+      syncBaseRow(id);
+      wireVariantRemove(plainList, () => syncBaseRow(id));
+    });
+    wireVariantRemove(plainList, () => syncBaseRow(id));
+    // The first shade: today's sizes and prices become its prices.
+    document.getElementById(`add-shade-${id}`).addEventListener('click', () => {
+      const baseHeight = document.getElementById(`f-height-${id}`).value.trim();
+      if (!baseHeight) {
+        msg().textContent = 'خطا: برای افزودن شید، اول «ارتفاع پایه» را وارد کنید.';
+        msg().className = 'msg error';
+        return;
+      }
+      const others = [...plainList.querySelectorAll('.variant-row:not([data-base])')]
+        .map((row) => ({ height: row.querySelector('.v-height').value.trim(), price: row.querySelector('.v-price').value }))
+        .filter((r) => r.height !== '' && r.height !== baseHeight);
+      const sizes = [{ height: baseHeight, price: document.getElementById(`price-${id}`).value }, ...others];
+      renderSizesBlock(id, shadeBlockHtml(id, {
+        sizes: sizes.map((x) => x.height),
+        shades: [{ key: newShadeKey([]), name_fa: '', name_en: '', in_stock: true, prices: sizes.map((x) => x.price) }],
+      }));
+      msg().textContent = '';
+    });
+    return;
+  }
+
+  // With shades.
+  const redraw = (change) => {
+    const model = readShadeBlock(id);
+    change(model);
+    if (!model.shades.length) {
+      // The last shade is gone: back to sizes with a price each — the
+      // removed shade's prices, the base size's in the price box above.
+      const removed = model.removed;
+      const prices = removed ? removed.prices : [];
+      const baseHeight = Number(document.getElementById(`f-height-${id}`).value);
+      const variants = model.sizes
+        .map((h, i) => ({ height: Number(h), price: Number(unformatPrice(prices[i] ?? '')) }))
+        .filter((v) => String(v.height) !== 'NaN' && v.price > 0);
+      const base = variants.find((v) => v.height === baseHeight);
+      if (base) document.getElementById(`price-${id}`).value = formatPrice(base.price);
+      renderSizesBlock(id, plainSizesBlockHtml(id, variants, baseHeight, base ? base.price : null));
+      syncBaseRow(id);
+      return;
+    }
+    renderSizesBlock(id, shadeBlockHtml(id, model));
+  };
+  document.getElementById(`add-size-${id}`).addEventListener('click', () =>
+    redraw((m) => {
+      m.sizes.push('');
+      m.shades.forEach((s) => s.prices.push(''));
+    })
+  );
+  document.querySelectorAll(`#sh-sizes-${id} .remove-size`).forEach((btn, i) => {
+    btn.addEventListener('click', () =>
+      redraw((m) => {
+        m.sizes.splice(i, 1);
+        m.shades.forEach((s) => s.prices.splice(i, 1));
+      })
+    );
+  });
+  document.getElementById(`add-shade-${id}`).addEventListener('click', () =>
+    redraw((m) => {
+      m.shades.push({ key: newShadeKey(m.shades.map((s) => s.key)), name_fa: '', name_en: '', in_stock: true, prices: m.sizes.map(() => '') });
+    })
+  );
+  document.querySelectorAll(`#sh-list-${id} .remove-shade`).forEach((btn, i) => {
+    btn.addEventListener('click', () =>
+      redraw((m) => {
+        [m.removed] = m.shades.splice(i, 1);
+      })
+    );
+  });
+  // A size's height relabels its price boxes as it is typed (a one-size
+  // product's box is just «قیمت»).
+  const heightInputs = document.querySelectorAll(`#sh-sizes-${id} .v-height`);
+  if (heightInputs.length < 2) return;
+  heightInputs.forEach((input, i) => {
+    input.addEventListener('input', () => {
+      const h = input.value.trim();
+      document.querySelectorAll(`#sh-list-${id} .s-price-cell[data-idx="${i}"] span`).forEach((span) => {
+        span.textContent = 'قیمت — ' + (h ? h + ' سانتی‌متر' : 'اندازه‌ی جدید');
+      });
+    });
+  });
 }
 
 function toggleEdit(id) {
@@ -723,18 +989,7 @@ function toggleEdit(id) {
   wrap.style.display = 'table-row';
   btn.textContent = 'بستن ویرایش ▴';
 
-  document.getElementById(`add-variant-${id}`).addEventListener('click', () => {
-    const list = document.getElementById(`variants-list-${id}`);
-    const idx = list.children.length;
-    list.insertAdjacentHTML(
-      'beforeend',
-      hasShadeTypes(p) ? shadeVariantRowHtml(idx, shadeKeysOf(p)) : variantRowHtml(id, idx, '', '')
-    );
-    // The first added size brings the base size in with it, as row one.
-    syncBaseRow(id);
-    wireVariantRemove(list, () => syncBaseRow(id));
-  });
-  wireVariantRemove(document.getElementById(`variants-list-${id}`), () => syncBaseRow(id));
+  wireSizesBlock(id);
 
   wirePhotoField(id, `f-photo-${id}`, () => p.slug);
   document.getElementById(`save-full-${id}`).addEventListener('click', () => saveProductFull(id));
@@ -810,32 +1065,28 @@ async function saveProductFull(id) {
   const variantRows = document.querySelectorAll(`#variants-list-${id} .variant-row:not([data-base])`);
   const variants = [];
   let basePrice = null;
-  if (cachedRow && hasShadeTypes(cachedRow)) {
-    // Every size needs every shade price — a half-filled row is an error,
-    // not silently dropped, because the server rejects unknown sizes.
-    const isPrice = (n) => Number.isSafeInteger(n) && n > 0;
-    const shadeKeys = shadeKeysOf(cachedRow);
-    for (const row of variantRows) {
-      const h = Number(row.querySelector('.v-height').value);
-      const shades = {};
-      for (const input of row.querySelectorAll('.v-shade-price')) shades[input.dataset.shade] = Number(unformatPrice(input.value));
-      const complete = shadeKeys.every((k) => isPrice(shades[k]));
-      if (!isPrice(h) || !complete || variants.some((v) => v.height === h)) {
-        msg.textContent = 'خطا: برای هر اندازه، ارتفاع (تکراری نباشد) و همه‌ی قیمت‌های شید را وارد کنید.';
-        msg.className = 'msg error';
-        return;
-      }
-      variants.push({ height: h, price: shades.plain ?? shades[shadeKeys[0]], shades });
-    }
-    // The card and its "افزودن به سبد" use the base size, so it must be one
-    // of the sizes; the base price follows that size's plain price.
-    const base = variants.find((v) => v.height === height_cm);
-    if (!base) {
-      msg.textContent = 'خطا: ارتفاع پایه باید یکی از اندازه‌های بالا باشد.';
+  // [] = no shades: written whenever the row has the column, so deleting the
+  // last shade also clears the list.
+  let shade_types = [];
+  if (document.getElementById(`sh-list-${id}`)) {
+    // With shades: every size needs every shade's price — a half-filled
+    // row is an error, not silently dropped, because the server rejects
+    // unknown sizes and shades. The base size must be one of the sizes
+    // (the card and its «افزودن به سبد» use it).
+    const saved = shadeFormToSave({ ...readShadeBlock(id), baseHeight: heightVal });
+    if (saved.error) {
+      msg.textContent = saved.error;
       msg.className = 'msg error';
       return;
     }
-    basePrice = base.price;
+    if (shadesNeedMigration(cachedRow, saved.shade_types)) {
+      msg.textContent = 'خطا: برای افزودن، تغییر نام یا ناموجود کردن شید، اول فایل supabase/migration-shade-types.sql باید در Supabase اجرا شود.';
+      msg.className = 'msg error';
+      return;
+    }
+    variants.push(...saved.variants);
+    shade_types = saved.shade_types;
+    basePrice = saved.price;
   } else {
     const otherRows = [];
     for (const row of variantRows) {
@@ -869,6 +1120,8 @@ async function saveProductFull(id) {
   // Send them only when the loaded row has them, so a save still works if
   // this panel is deployed before the migration runs.
   if (cachedRow && 'body_size' in cachedRow) Object.assign(fields, { body_size, shade_size });
+  // shade_types only exists after supabase/migration-shade-types.sql — same rule.
+  if (cachedRow && 'shade_types' in cachedRow) fields.shade_types = shade_types;
 
   const { error } = await sb
     .from('products')

@@ -134,7 +134,7 @@ function storefront(state = { cart: {}, favs: {}, selectedShade: 'plain', select
   const code = [
     fnSrc(appJs, 'parseCartKey'),
     appJs.match(/const SHADE_TYPES = [^\n]*\n/)[0],
-    ...['hasShadeTypes', 'shadeOption', 'cartLineData', 'cartKeyFor', 'cardCartKey', 'addToCart', 'screenProduct'].map((n) => fnSrc(appJs, n)),
+    ...['hasShadeTypes', 'shadeTypesOf', 'sizeShadesOf', 'defaultShade', 'shadeOption', 'cartLineData', 'cartKeyFor', 'cardCartKey', 'addToCart', 'screenProduct'].map((n) => fnSrc(appJs, n)),
     'return { cardCartKey, cartLineData, addToCart, screenProduct };',
   ].join('\n');
   const fns = new Function(
@@ -194,22 +194,20 @@ test('card shows «· چند اندازه» only for more than one size: not nil
 
 // ---- admin ---------------------------------------------------------------------
 
-test('admin shows one row (40 cm) with «شید ساده» and «شید گلدوزی» price boxes for nila', () => {
-  const code = [
-    ...['toLatinDigits', 'unformatPrice', 'formatPrice'].map((n) => fnSrc(adminJs, n)),
-    adminJs.match(/const SHADE_TYPES = [^\n]*\n/)[0],
-    adminJs.match(/const hasShadeTypes = [\s\S]*?;\n/)[0],
-    adminJs.match(/const shadeKeysOf = [\s\S]*?;\n/)[0],
-    fnSrc(adminJs, 'shadeVariantRowHtml'),
-    'return { hasShadeTypes, shadeKeysOf, shadeVariantRowHtml };',
-  ].join('\n');
-  const { hasShadeTypes, shadeKeysOf, shadeVariantRowHtml } = new Function(code)();
+test('admin shows one size (40 cm) and two shade rows, «شید ساده» and «شید گلدوزی», one «قیمت» each, for nila', () => {
+  const SRC = adminJs;
+  const { shadeModelOf, shadeBlockHtml } = new Function(
+    [
+      ...['toLatinDigits', 'unformatPrice', 'formatPrice', 'escapeHtml', 'escapeAttr', 'shadeTypesOf', 'shadeModelOf', 'shadeBlockHtml'].map((n) => SRC.match(new RegExp(`function ${n}\\([\\s\\S]*?\\n}\\n`))[0]),
+      SRC.match(/const SHADE_TYPES = [^\n]*\n/)[0],
+      SRC.match(/const SHADE_NAME_MAX = [^\n]*\n/)[0],
+      'return { shadeModelOf, shadeBlockHtml };',
+    ].join('\n')
+  )();
+  const hasShadeTypes = new Function(adminJs.match(/const hasShadeTypes = [\s\S]*?;\n/)[0] + 'return hasShadeTypes;')();
   assert.equal(hasShadeTypes(nila), true);
-  assert.deepEqual(shadeKeysOf(nila), ['plain', 'embroidered']);
-  const row = shadeVariantRowHtml(0, shadeKeysOf(nila), nila.variants[0]);
-  const placeholders = [...row.matchAll(/placeholder="([^"]*)"/g)].map((m) => m[1]);
-  assert.deepEqual(placeholders, ['ارتفاع (سانتی‌متر)', 'قیمت شید ساده (تومان)', 'قیمت شید گلدوزی (تومان)']);
-  assert.match(row, /class="v-height" value="40"/);
-  assert.match(row, /data-shade="plain" value="6,500,000"/);
-  assert.match(row, /data-shade="embroidered" value="8,900,000"/);
+  const html = shadeBlockHtml('n1', shadeModelOf(nila));
+  assert.match(html, /<div class="variant-row sh-size-row" data-idx="0">\s*<input type="number" placeholder="ارتفاع \(سانتی‌متر\)" class="v-height" value="40">/);
+  const rows = [...html.matchAll(/<div class="shade-row" data-key="(\w+)">[\s\S]*?class="s-name-fa"[^>]*value="([^"]*)"[\s\S]*?<span>([^<]*)<\/span>\s*<input[^>]*value="([^"]*)"/g)];
+  assert.deepEqual(rows.map((m) => m.slice(1)), [['plain', 'شید ساده', 'قیمت', '6,500,000'], ['embroidered', 'شید گلدوزی', 'قیمت', '8,900,000']]);
 });

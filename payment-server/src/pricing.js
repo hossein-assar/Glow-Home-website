@@ -113,30 +113,52 @@ export function parseCartKey(key) {
   return { id, height, colorIndex, shade };
 }
 
-// Shade types a size can be priced by (گیسو, دفرمه). Prices live in the DB
-// on each variant: {"height": 140, "price": …, "shades": {"plain": …,
-// "embroidered": …}}. A size accepts only the keys stored in its own
-// `shades` map. Same labels in api/orders.js, app.js and admin/admin.js.
+// Shades are data (supabase/migration-shade-types.sql): products.shade_types
+// lists them in display order as [{key, name_fa, name_en, in_stock}], and
+// each size stores the FULL price per shade in variants[].shades
+// ({"height": 140, "price": <first shade>, "shades": {"plain": …, "k3x9a": …}}).
+// `key` never changes (cart keys use it: "gisoo::h140::splain"); the name
+// can. SHADE_TYPES is only the fallback for a row whose shade_types is
+// still empty (the three original types, by the keys in its variants).
+// ⚠ shadeTypesOf and shadeLine are the same in app.js (shadeTypesOf),
+// admin/admin.js (shadeTypesOf), api/orders.js and
+// payment-server/src/pricing.js — `npm test` in payment-server/ checks.
 export const SHADE_TYPES = { plain: 'شید ساده', embroidered: 'شید گلدوزی', macrame: 'شید مکرومه' };
 
 export function hasShadeTypes(p) {
   return Array.isArray(p.variants) && p.variants.some((v) => v && v.shades && typeof v.shades === 'object');
 }
 
+/** The product's shades, in display order: shade_types, or the fallback. */
+export function shadeTypesOf(p) {
+  const stored = Array.isArray(p.shade_types) ? p.shade_types : [];
+  if (stored.length) {
+    return stored
+      .filter((t) => t && typeof t.key === 'string' && /^[a-z][a-z0-9]{0,31}$/.test(t.key) && String(t.name_fa ?? '').trim())
+      .map((t) => ({ key: t.key, name_fa: String(t.name_fa).trim(), name_en: String(t.name_en ?? '').trim(), in_stock: t.in_stock !== false }));
+  }
+  const variants = Array.isArray(p.variants) ? p.variants : [];
+  return Object.keys(SHADE_TYPES)
+    .filter((k) => variants.some((v) => v && v.shades && typeof v.shades === 'object' && Object.hasOwn(v.shades, k)))
+    .map((k) => ({ key: k, name_fa: SHADE_TYPES[k], name_en: '', in_stock: true }));
+}
+
 /**
- * Strict pricing for a product with shade types: the cart key must name a
- * stored height AND a stored shade type for it. Old keys (no shade, or a
- * removed size) are rejected, never guessed. Returns { price, label } or { error }.
+ * Strict pricing for a product with shades: the cart key must name a stored
+ * height AND one of the product's shades stored for that size; an
+ * unavailable shade is refused. Old keys (no shade, a removed size or
+ * shade) are rejected, never guessed. Returns { price, label } or { error }.
  */
 export function shadeLine(p, height, shade) {
   const v = height == null ? null : p.variants.find((x) => x && x.shades && x.height === height);
-  const known = v && shade != null && Object.hasOwn(SHADE_TYPES, shade) && Object.hasOwn(v.shades, shade);
-  if (!known) {
+  const type = shade == null ? null : shadeTypesOf(p).find((t) => t.key === shade);
+  if (!v || !type || !Object.hasOwn(v.shades, shade)) {
     return { error: `اندازه یا نوع شید «${p.name_fa}» در سبد شما دیگر معتبر نیست. لطفاً آن را از سبد حذف کنید و دوباره انتخاب کنید.` };
   }
+  if (!type.in_stock) return { error: `«${p.name_fa}» با «${type.name_fa}» فعلاً موجود نیست. لطفاً شید دیگری انتخاب کنید.` };
   const price = Number(v.shades[shade]);
   if (!Number.isSafeInteger(price) || price <= 0) return { error: `قیمت «${p.name_fa}» هنوز مشخص نشده است.` };
-  return { price, label: `${p.name_fa} (${v.height} سانتی‌متر) — ${SHADE_TYPES[shade]}` };
+  return { price, label: `${p.name_fa} (${v.height} سانتی‌متر) — ${type.name_fa}` };
 }
 
 // The complete size list of a product without shade types: its `variants`,
@@ -237,7 +259,7 @@ export function validateCheckoutBody(body) {
 
 /**
  * Re-prices the cart from DB product rows. Never uses a client price.
- * products: rows with { id, slug, name_fa, price, height_cm, variants, colors, in_stock }.
+ * products: rows with { id, slug, name_fa, price, height_cm, variants, shade_types, colors, in_stock }.
  * Returns { error } or { orderItems, subtotal, discount, discountCode, fees,
  * total, shippingMethod, shippingCost }. subtotal is the products only;
  * orderItems and total also include cityFees(city). `codes` defaults to

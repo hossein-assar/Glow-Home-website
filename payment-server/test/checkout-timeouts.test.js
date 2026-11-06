@@ -269,7 +269,7 @@ test('createDb: a Supabase server that never answers makes fetchProductsBySlugs 
   assert.ok(Date.now() - t0 < 1000);
   // supabase-js's own retries are off; ours tries a read exactly twice (db-retry.test.js)
   assert.equal(seen.length, 2);
-  assert.match(seen[0], /^https:\/\/glow-home\.ir\/sb\/rest\/v1\/products\?select=id%2Cslug%2Cname_fa%2Cprice%2Cheight_cm%2Cvariants%2Ccolors%2Cin_stock&slug=in\.%28gisoo%29$/);
+  assert.match(seen[0], /^https:\/\/glow-home\.ir\/sb\/rest\/v1\/products\?select=id%2Cslug%2Cname_fa%2Cprice%2Cheight_cm%2Cvariants%2Cshade_types%2Ccolors%2Cin_stock&slug=in\.%28gisoo%29$/);
 });
 
 // ---- storefront -----------------------------------------------------------------------

@@ -47,6 +47,9 @@ function storefront(catalog) {
     fnSrc('parseCartKey'),
     grab(/const SHADE_TYPES = [^\n]*\n/),
     fnSrc('hasShadeTypes'),
+    fnSrc('shadeTypesOf'),
+    fnSrc('sizeShadesOf'),
+    fnSrc('defaultShade'),
     fnSrc('shadeOption'),
     fnSrc('cartLineData'),
     fnSrc('cartKeyFor'),
@@ -101,11 +104,14 @@ test('each product only accepts its own shade types in the cart', () => {
   assert.deepEqual(sf.state.cart, {});
 });
 
-test('the product page shade picker lists only the stored shade types, plain by default', () => {
-  // The picker filters SHADE_TYPES by the chosen size's own shades map.
-  assert.match(src, /Object\.entries\(SHADE_TYPES\)\s*\.filter\(\(\[key\]\) => Object\.hasOwn\(effectiveVariant\.shades, key\)\)/);
-  assert.match(src, /selectedShade: 'plain',/);
-  assert.match(src, /state\.selectedShade = 'plain';/);
+test('the product page shade picker lists only the size\'s stored shades; default = first available (plain for today\'s products)', () => {
+  // The picker lists the product's shades (shade_types, or the original
+  // three as fallback) that the chosen size stores; none is picked by
+  // default, so the size's first available one is used.
+  assert.match(src, /const sizeShades = hasShades \? sizeShadesOf\(p, effectiveVariant\) : \[\];/);
+  assert.match(src, /\$\{sizeShades\s*\.map\(\(t\) => \{/);
+  assert.match(src, /selectedShade: null,/);
+  assert.match(src, /state\.selectedShade = null;/);
 });
 
 test('other products are added exactly as before', () => {

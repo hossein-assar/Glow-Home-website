@@ -26,7 +26,8 @@ function adminEnv(cached) {
   const updates = [];
   const els = {};
   const document = {
-    getElementById: (id) => (els[id] ||= { value: '', textContent: '', className: '' }),
+    // the shade block's lists exist only while the form has shades (none here)
+    getElementById: (id) => (/^sh-(list|sizes)-/.test(id) ? null : (els[id] ||= { value: '', textContent: '', className: '' })),
     querySelectorAll: () => [],
   };
   const sb = {
@@ -45,11 +46,11 @@ function adminEnv(cached) {
       grab(adminJs, /const STYLE_OPTIONS = [^\n]*\n/),
       grab(adminJs, /const hasShadeTypes = [\s\S]*?;\n/),
       grab(adminJs, /const SHADE_TYPES = [^\n]*\n/),
-      grab(adminJs, /const shadeKeysOf = [\s\S]*?;\n/),
+      grab(adminJs, /const SHADE_NAME_MAX = [^\n]*\n/),
       grab(adminJs, /const photoUploads = [^\n]*\n/),
       ...['escapeHtml', 'escapeAttr', 'toLatinDigits', 'unformatPrice', 'formatPrice', 'mainPhoto', 'mainPhotoFields',
         'withBaseSize', 'baseSizeOf', 'sizesToSave', 'baseRowHtml',
-        'variantRowHtml', 'shadeVariantRowHtml', 'editPanelHtml', 'rowHtml', 'saveProductFull'].map((n) => fnSrc(adminJs, n)),
+        'variantRowHtml', 'shadeTypesOf', 'shadeModelOf', 'plainSizesBlockHtml', 'shadeBlockHtml', 'readShadeBlock', 'shadeFormToSave', 'shadesNeedMigration', 'faNum', 'editPanelHtml', 'rowHtml', 'saveProductFull'].map((n) => fnSrc(adminJs, n)),
       'const photoFieldHtml = () => "";',
       'const COLLECTION_LABEL = {};',
       'return { editPanelHtml, rowHtml, saveProductFull };',

@@ -307,6 +307,9 @@ decisions from code alone — read this before making structural changes.
 ## Catalog data model (products table)
 
 - `collection`: lamps | shades | candles | decor (the 4 top-level nav items)
+- `shade_types` (jsonb list) + `variants[].shades` (price per size): the
+  product's shades («شیدها»), edited in the admin — see "Shades" below.
+  (Not the `shades` *collection*, which is the شید category.)
 - `subcategory`: material-based grouping *within* a collection (سفالی,
   پلی‌استر, چوبی for lamps; ساده/گلدوزی for shades; شاتی/قلمی for candles)
 - `style`: placement-based, lamps only — رومیزی (desk) vs کنار سالنی
@@ -349,16 +352,44 @@ correctly-priced cart lines. The payment server (and the kept copy in
 `api/orders.js`) re-parses this same key format server-side to resolve
 authoritative prices — if you change this format, update all of them.
 
-A product whose `variants` entries carry a `shades` map (گیسو: plain /
-embroidered, دفرمه: plain / macrame — see `supabase/migration-*-shades.sql`)
-is also priced by shade type:
-`{"height":140,"price":<plain>,"shades":{"plain":…,"embroidered":…}}`, cart
-key `gisoo::h140::splain` / `::sembroidered`. A size accepts only the keys in
-its own `shades` map; labels are `SHADE_TYPES`, copied in app.js,
-admin/admin.js, api/orders.js and payment-server. Such a product is priced
-strictly by the payment server — a key without a stored height + shade (e.g. an
-old `gisoo::h100`) is rejected, not guessed; the storefront drops those
-stale lines from the cart once the live catalog loads.
+**Shades («شیدها») are data, edited by Sahar** in «ویرایش کامل» → «شیدها»
+(any product, mainly آباژور). Two parts on `products`
+(`supabase/migration-shade-types.sql`):
+- `shade_types jsonb` — the shades in display order,
+  `[{"key","name_fa","name_en","in_stock"}]`;
+- `variants[].shades` — the **full** price (not a surcharge) of that size
+  with that shade, by key:
+  `{"height":140,"price":<first shade>,"shades":{"plain":…,"k7f3q2a":…}}`.
+  `price` on each size is its first shade's price, and `products.price` is
+  the base size with the first shade (card price).
+Prices differ per size (گیسو گلدوزی: 15,450,000 at 140 cm, 11,600,000 at
+100 cm), so a shade row has one price per size — one «قیمت» for a one-size
+product. `key` never changes once made (the original three keep `plain` /
+`embroidered` / `macrame`; a new one gets `k` + 6 characters), so renaming
+a shade never breaks a cart: cart key `gisoo::h140::splain`. The migration
+gave گیسو / دفرمه / نیلا their original shades with today's names and
+order, prices untouched; `SHADE_TYPES` (copied in app.js, admin.js,
+api/orders.js, payment-server) is now only the fallback for a row whose
+`shade_types` is still empty. `shadeTypesOf()` is the same function in all
+four (a test compares them). Storefront: the picker lists the size's
+shades from the data; an unavailable one is shown «(ناموجود)» and can't be
+chosen; the default is the size's first available shade; with none
+available the page offers no «افزودن به سبد». Payment server: a key must
+name a stored height and a listed shade stored for that size, else it is
+rejected (not guessed); an unavailable shade is refused with «… با «…» فعلاً
+موجود نیست»; the price is always the DB's. The order line keeps its own
+copy of the label («روشا (45 سانتی‌متر) — شید گلدوزی رز») and price in
+`order_items`, so renaming or deleting a shade never changes an old order.
+Admin: adding the first shade to a product with plain sizes turns its
+sizes into that shade's prices (pre-filled); deleting the last shade turns
+them back; «ذخیره همه» validates through `shadeFormToSave()` (Persian
+name required, ≤ 40 characters, no duplicate name within a product —
+ي/ی, ك/ک, spaces and case count as the same — every price a positive
+whole number, base height among the sizes). Before the SQL has run, only
+the original three, unchanged, can be saved (`shadesNeedMigration`). On a
+phone the «ویرایش کامل» panel keeps the visible width of the sideways-
+scrolling products table (`.edit-panel`, sticky, `100cqw`). Tests:
+`shade-types.test.js`, plus gisoo / deforme / nila.
 
 Sizes are strict the same way for every product: a key naming a height must
 name one of `withBaseSize()`'s sizes, or the payment server rejects it (it used to

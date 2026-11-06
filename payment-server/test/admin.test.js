@@ -78,7 +78,7 @@ test('saved values are plain integers, same as before', () => {
   assert.match(adminJs, /const price = Number\(unformatPrice\(document\.getElementById\(`price-\$\{id\}`\)\.value\)\) \|\| 0;/);
   assert.match(adminJs, /price: Number\(unformatPrice\(document\.getElementById\('new-price'\)\.value\)\) \|\| 0,/);
   assert.match(adminJs, /const pr = unformatPrice\(row\.querySelector\('\.v-price'\)\.value\);/);
-  assert.match(adminJs, /shades\[input\.dataset\.shade\] = Number\(unformatPrice\(input\.value\)\);/);
+  assert.match(adminJs, /const price = num\(unformatPrice\(s\.prices\[i\] \?\? ''\)\);/); // shade prices (shadeFormToSave)
 });
 
 test('the caret stays after the same digit while typing', () => {
@@ -108,7 +108,7 @@ test('no price input is left as type="number"', () => {
   // DB values are shown formatted when the panel loads.
   assert.match(adminJs, /value="\$\{formatPrice\(p\.price\)\}"/);
   assert.match(adminJs, /value="\$\{formatPrice\(price\)\}"/);
-  assert.match(adminJs, /value="\$\{formatPrice\(sh\[k\]\)\}"/);
+  assert.match(adminJs, /value="\$\{formatPrice\(s\.prices\[i\] \?\? ''\)\}"/); // shade prices
   assert.match(adminHtml, /<th>قیمت \(تومان\)<\/th>/);
 });
 

@@ -109,6 +109,27 @@
   .variant-row input { width: auto; flex: 1; }
   .variant-row button { flex: 0 0 auto; padding: 5px 10px; }
   .price-input { text-align: left; font-variant-numeric: tabular-nums; }
+  /* «شیدها»: one box per shade; everything wraps, so a phone shows the
+     name, English name, «موجود» and «حذف» on two lines and one price per line. */
+  .shades-head { margin-top: 14px; }
+  .shades-head .hint { display: block; font-size: 12px; color: #8a7d6e; margin: 2px 0 6px; }
+  .shade-row { border: 1px solid var(--divider); border-radius: 10px; background: #fff; padding: 10px; margin-bottom: 8px; }
+  .shade-row-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .shade-row-head input[type="text"], .shade-row-head .s-name-fa, .shade-row-head .s-name-en { flex: 1 1 150px; min-width: 0; width: auto; }
+  .shade-row-head .s-stock { display: inline-flex; align-items: center; gap: 4px; margin: 0; white-space: nowrap; font-size: 13px; }
+  .shade-row-head .s-stock input { width: auto; margin: 0; }
+  .shade-row-head button { flex: 0 0 auto; padding: 5px 10px; }
+  .shade-prices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .s-price-cell { flex: 1 1 160px; min-width: 0; display: flex; flex-direction: column; gap: 2px; margin: 0; font-size: 12px; color: #6b5f52; }
+  .s-price-cell input { width: 100%; }
+  /* «ویرایش کامل» opens inside the products table, which scrolls sideways on
+     a phone; the panel stays the width of what is visible and doesn't scroll
+     with the table, so every field (and every shade price) is on screen. */
+  .products-scroll { container-type: inline-size; }
+  .edit-panel { position: sticky; right: 0; width: 100cqw; }
+  @media (max-width: 600px) {
+    .edit-grid { grid-template-columns: 1fr; }
+  }
   .photo-field { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
   .photo-drop {
     width: 120px;
@@ -265,7 +286,7 @@
       <div style="margin-bottom:14px">
         <input type="search" id="product-search" placeholder="جستجوی محصول..." style="max-width:320px">
       </div>
-      <div style="overflow-x:auto">
+      <div class="products-scroll" style="overflow-x:auto">
         <table id="products-table">
           <thead>
             <tr>

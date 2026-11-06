@@ -46,6 +46,7 @@ create table if not exists products (
   height_cm integer,                 -- the DEFAULT/base size shown before a variant is picked
   price bigint not null default 0,   -- price for the default size above
   variants jsonb not null default '[]', -- other sizes: [{"height": 140, "price": 12980000}, ...]
+  shade_types jsonb not null default '[]' constraint products_shade_types_is_array check (jsonb_typeof(shade_types) = 'array'), -- shades in display order: [{"key": "plain", "name_fa": "شید ساده", "name_en": "", "in_stock": true}]; prices per size in variants[].shades (migration-shade-types.sql)
   colors text[] not null default '{}', -- e.g. ['یاسی', 'سبز', 'آبی'] — same price, just a choice
   price_provisional boolean not null default true,
   photo_url text,                    -- cover photo, shown on cards/grids

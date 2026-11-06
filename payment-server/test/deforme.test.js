@@ -135,24 +135,28 @@ test('a tampered client price for deforme is ignored: the price comes from the D
   assert.equal(tomanToGatewayAmount(r.total), 135000000);
 });
 
-test('admin shows one price box per shade type found in the product data', () => {
-  const src = read('../../admin/admin.js');
-  const code = [
-    ...['toLatinDigits', 'unformatPrice', 'formatPrice'].map((n) => src.match(new RegExp(`function ${n}\\([\\s\\S]*?\\n}\\n`))[0]),
-    src.match(/const SHADE_TYPES = [^\n]*\n/)[0],
-    src.match(/const shadeKeysOf = [\s\S]*?;\n/)[0],
-    src.match(/function shadeVariantRowHtml\([\s\S]*?\n}\n/)[0],
-    'return { shadeKeysOf, shadeVariantRowHtml };',
-  ].join('\n');
-  const { shadeKeysOf, shadeVariantRowHtml } = new Function(code)();
-  assert.deepEqual(shadeKeysOf(gisoo), ['plain', 'embroidered']);
-  assert.deepEqual(shadeKeysOf(deforme), ['plain', 'macrame']);
-
-  const placeholders = (html) => [...html.matchAll(/placeholder="([^"]*)"/g)].map((m) => m[1]);
-  const gisooRow = shadeVariantRowHtml(0, shadeKeysOf(gisoo), gisoo.variants[0]);
-  assert.deepEqual(placeholders(gisooRow), ['ارتفاع (سانتی‌متر)', 'قیمت شید ساده (تومان)', 'قیمت شید گلدوزی (تومان)']);
-  assert.match(gisooRow, /data-shade="embroidered" value="15,450,000"/);
-  const deformeRow = shadeVariantRowHtml(0, shadeKeysOf(deforme), deforme.variants[0]);
-  assert.deepEqual(placeholders(deformeRow), ['ارتفاع (سانتی‌متر)', 'قیمت شید ساده (تومان)', 'قیمت شید مکرومه (تومان)']);
-  assert.match(deformeRow, /data-shade="macrame" value="13,500,000"/);
+test('admin shows one row per shade found in the product data, with its price for every size', () => {
+  const SRC = read('../../admin/admin.js');
+  const { shadeModelOf, shadeBlockHtml } = new Function(
+    [
+      ...['toLatinDigits', 'unformatPrice', 'formatPrice', 'escapeHtml', 'escapeAttr', 'shadeTypesOf', 'shadeModelOf', 'shadeBlockHtml'].map((n) => SRC.match(new RegExp(`function ${n}\\([\\s\\S]*?\\n}\\n`))[0]),
+      SRC.match(/const SHADE_TYPES = [^\n]*\n/)[0],
+      SRC.match(/const SHADE_NAME_MAX = [^\n]*\n/)[0],
+      'return { shadeModelOf, shadeBlockHtml };',
+    ].join('\n')
+  )();
+  const g = shadeModelOf(gisoo);
+  assert.deepEqual(g.sizes, ['140', '120', '100']);
+  assert.deepEqual(g.shades.map((s) => [s.key, s.name_fa, s.prices]), [
+    ['plain', 'شید ساده', [12980000, 9980000, 9100000]],
+    ['embroidered', 'شید گلدوزی', [15450000, 12480000, 11600000]],
+  ]);
+  const d = shadeModelOf(deforme);
+  assert.deepEqual(d.shades.map((s) => [s.key, s.name_fa, s.prices]), [
+    ['plain', 'شید ساده', [13100000, 10100000, 9400000]],
+    ['macrame', 'شید مکرومه', [13500000, 10500000, 9800000]],
+  ]);
+  const html = shadeBlockHtml('d1', d);
+  assert.match(html, /<div class="shade-row" data-key="macrame">[\s\S]*?value="شید مکرومه"/);
+  assert.match(html, /<span>قیمت — 140 سانتی‌متر<\/span>\s*<input[^>]*data-idx="0"[^>]*value="13,500,000"/);
 });
