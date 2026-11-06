@@ -230,9 +230,9 @@ decisions from code alone — read this before making structural changes.
   a new window (not a hidden iframe — Safari prints the parent page instead)
   and writes `orderPrintHtml(order, items, location.origin)` into it, built
   only from the order already loaded in the panel (no request), then opens
-  the print dialog once IRANSansX and the watermark image have loaded — at
-  most `PRINT_WAIT_MS` (3 s), so it never hangs; a watermark that fails to
-  load is removed. A4 portrait, black on white, in this order: header
+  the print dialog once IRANSansX and both watermark images have loaded —
+  at most `PRINT_WAIT_MS` (3 s), so it never hangs; a watermark that fails
+  to load is removed. A4 portrait, black on white, in this order: header
   (Glow Home / برگه سفارش, order code, date); the parcel label in
   `.label-area` (white background, above the watermark) — a small
   «فرستنده» box (1.5px border, 12pt, one line «فرستنده: سحر راد — +98 935 …»
@@ -253,19 +253,27 @@ decisions from code alone — read this before making structural changes.
   two lines: data.js `contactWhatsapp` and admin.js `SHOP_SENDER_PHONE`.
   Every order value is escaped. Never printed: the card number, and any
   phone number but the customer's and the sender's (never the old one).
-  **Watermark:** the storefront's line-art daffodil, the same file
-  `images/motif-flower.png` (183 KB, no copy), as one `<img class="watermark">`
-  inside `.slip` — never in the label — with an absolute URL from the
-  admin's origin like the fonts, `filter: grayscale(1)`, `opacity: 0.3`
+  **Two watermarks:** the storefront's line-art daffodil, the same file
+  `images/motif-flower.png` (183 KB, no copy; `motif-flower-light.png` is
+  the cream variant for the dark footer and would vanish on paper), as two
+  `<img class="watermark">` elements — never in the label — with an
+  absolute URL from the admin's origin like the fonts. The shared
+  `.watermark` rule gives both `filter: grayscale(1)`, `opacity: 0.3`
   (the PNG's lines are themselves only ~42% opaque, so this prints them like
   solid lines at ~0.12: measured grey ~238/255) and `print-color-adjust:
-  exact` (an element, not a CSS background, which browsers drop). It sits
-  at the bottom-left corner of the slip, behind the totals and footer, and
-  `.slip` clips it (`overflow: clip`) so it can never add a page. On a
-  cheap printer that drops light greys it simply disappears; the text is
-  unaffected.
-  Up to ~8 items fit one page; rows don't split, longer orders continue on
-  a second page. Tests: `admin-orders.test.js`.
+  exact` (elements, not CSS backgrounds, which browsers drop). Each is
+  clipped by its own box (`overflow: clip`), so neither can add a page:
+  - top-right (`.watermark-top`, 100 mm, `scaleX(-1) rotate(-8deg)`) inside
+    `.top`, the box around the header (Glow Home / برگه سفارش, code, date);
+    it bleeds off the top and right, only the bloom shows, and it is cut at
+    the header's bottom edge — above the sender box. First page only.
+  - bottom-left (`.slip > .watermark`, 120 mm) inside `.slip`, behind the
+    totals and footer.
+  On a cheap printer that drops light greys they simply disappear; the text
+  is unaffected.
+  Up to 8 items fit one page (with no customer note; with a note, 7 — at 8
+  only the footer moves to page 2); rows don't split, longer orders
+  continue on a second page. Tests: `admin-orders.test.js`.
 
 ## Catalog data model (products table)
 

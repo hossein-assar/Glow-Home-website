@@ -169,7 +169,10 @@ test('print: name, address, notes and the other order fields are escaped — not
     assert.ok(html.includes(esc), 'escaped: ' + esc);
   }
   assert.equal((html.match(/<script/gi) || []).length, 0, 'the page has no script at all');
-  assert.equal((html.match(/<img /g) || []).length, 1, 'the only image is the watermark');
+  // exactly two images, and both are the flower watermarks (top and bottom)
+  const imgs = html.match(/<img [^>]*>/g) || [];
+  assert.equal(imgs.length, 2, 'the only images are the two watermarks');
+  for (const img of imgs) assert.match(img, /^<img class="watermark( watermark-top)?" src="\/images\/motif-flower\.png" alt="" aria-hidden="true">$/);
 });
 
 // The sender number as digits only, read from data.js — never typed here.
@@ -223,7 +226,7 @@ test('print: the sender constants mirror data.js, and the spaced form is derived
 
 test('print: the page keeps its parts, in order', () => {
   const html = orderPrintHtml(ORDER, ITEMS);
-  const parts = ['class="head"', 'class="meta"', 'class="block label-area"', 'class="sender"', '<h2>گیرنده</h2>', 'class="label"', 'class="notes"', 'class="cut"', 'class="slip"', 'class="watermark"', '<h2>محتویات سفارش</h2>', '<table>', 'class="totals"', 'class="pay"', 'class="checks"', 'class="foot"'];
+  const parts = ['class="top"', 'class="watermark watermark-top"', 'class="head"', 'class="meta"', 'class="block label-area"', 'class="sender"', '<h2>گیرنده</h2>', 'class="label"', 'class="notes"', 'class="cut"', 'class="slip"', 'class="watermark"', '<h2>محتویات سفارش</h2>', '<table>', 'class="totals"', 'class="pay"', 'class="checks"', 'class="foot"'];
   const at = parts.map((p) => html.indexOf(p));
   assert.ok(at.every((i, k) => i > 0 && (k === 0 || i > at[k - 1])), 'order: ' + at);
   for (const p of parts) assert.equal(html.split(p).length, 2, 'once: ' + p);
@@ -238,6 +241,7 @@ test('print: the flower watermark — the storefront\'s motif, absolute URL on t
   assert.match(rule, /opacity: 0\.3;/, 'the motif PNG is itself ~42% opaque: 0.3 ≈ 0.12 on solid lines');
   assert.match(rule, /filter: grayscale\(1\);/);
   assert.match(rule, /position: absolute; z-index: 0;/);
+  assert.match(html, /\.slip > \.watermark \{ bottom: -14mm; inset-inline-end: -20mm; width: 120mm; \}/, 'bottom-left of the slip');
   assert.match(html, /\.slip \{ position: relative; overflow: hidden; overflow: clip; \}/, 'clipped by the slip: it can never add a page');
   assert.match(html, /\.slip > \*:not\(\.watermark\) \{ position: relative; z-index: 1; \}/, 'the slip text sits above it');
   // inside the slip (after the ✂ line), never inside the label area
@@ -248,15 +252,48 @@ test('print: the flower watermark — the storefront\'s motif, absolute URL on t
   assert.ok(readFileSync(new URL('../../images/motif-flower.png', import.meta.url)).length < 400 * 1024, 'a small file');
 });
 
-test('print: waits for the font and the watermark, at most PRINT_WAIT_MS; a failed image is removed', () => {
+test('print: the second flower — top-right behind the header, mirrored, clipped by the header, never in the label or the slip', () => {
+  const html = orderPrintHtml(ORDER, ITEMS, 'https://glow-home.ir');
+  const top = '<img class="watermark watermark-top" src="https://glow-home.ir/images/motif-flower.png" alt="" aria-hidden="true">';
+  assert.equal(html.split(top).length, 2, 'once, same file, absolute URL on the origin');
+  // inside .top, before the header text — and the header (brand, title, code, date) is all inside .top
+  assert.match(html, /<div class="page">\n  <div class="top">\n  <img class="watermark watermark-top" [^>]*>\n  <div class="head">[^]*?<div class="meta">[^]*?<\/div>\n  <\/div>\n\n  <div class="block label-area">/);
+  // NOT in the label area, NOT in the slip
+  const at = html.indexOf(top);
+  assert.ok(at < html.indexOf('<div class="block label-area">') && at < html.indexOf('<div class="slip">'));
+  const label = html.slice(html.indexOf('<div class="block label-area">'), html.indexOf('<div class="cut"'));
+  const slip = html.slice(html.indexOf('<div class="slip">'));
+  assert.ok(!label.includes('watermark') && !label.includes('motif-flower'), 'not in the label');
+  assert.ok(!slip.includes('watermark-top'), 'not in the slip');
+  // the shared .watermark rule (exact-colour print, grey, same 0.3 opacity) applies: it has that class
+  const shared = html.match(/\.watermark \{([^}]*)\}/)[1];
+  assert.match(shared, /-webkit-print-color-adjust: exact; print-color-adjust: exact;/);
+  assert.match(shared, /opacity: 0\.3;/);
+  assert.match(shared, /filter: grayscale\(1\);/);
+  const rule = html.match(/\.watermark-top \{([^}]*)\}/)[1];
+  assert.doesNotMatch(rule, /opacity|print-color-adjust/, 'nothing overrides the shared rule');
+  assert.match(rule, /top: -\d+mm; right: -\d+mm;/, 'bleeds off the top and the right edge');
+  assert.match(rule, /transform: scaleX\(-1\)/, 'mirrored');
+  const width = Number(rule.match(/width: (\d+)mm;/)[1]);
+  assert.ok(width >= 90 && width <= 110, 'about 90–110 mm wide: ' + width);
+  // clipped by the header box: it can never reach the sender box or add a page
+  assert.match(html, /\.top \{ position: relative; overflow: hidden; overflow: clip; \}/);
+  assert.match(html, /\.top > \*:not\(\.watermark\) \{ position: relative; z-index: 1; \}/, 'the header text sits above it');
+  assert.doesNotMatch(html, /background(-image)?:\s*url\(/, 'not a CSS background');
+  assert.ok(orderPrintHtml(ORDER, ITEMS).includes('<img class="watermark watermark-top" src="/images/motif-flower.png"'), 'root-relative without an origin');
+});
+
+test('print: waits for the font and both watermarks, at most PRINT_WAIT_MS; a failed image is removed', () => {
   const print = fnSrc('printOrder');
   assert.match(adminJs, /\nconst PRINT_WAIT_MS = 3000;\n/);
   assert.match(print, /win\.document\.fonts && win\.document\.fonts\.ready/);
-  assert.match(print, /querySelector\('\.watermark'\)/);
+  assert.match(print, /querySelectorAll\('\.watermark'\)/, 'every watermark, not just the first');
   assert.match(print, /img\.addEventListener\('load', resolve\)/);
-  assert.match(print, /img\.addEventListener\('error', \(\) => \{\s*img\.remove\(\);\s*resolve\(\);/);
+  assert.match(print, /const failed = \(\) => \{\s*img\.remove\(\);\s*resolve\(\);/);
+  assert.match(print, /img\.addEventListener\('error', failed\)/);
+  assert.match(print, /if \(img\.complete\) return img\.naturalWidth \? resolve\(\) : failed\(\);/, 'an image that already failed is removed too');
   assert.match(print, /setTimeout\(resolve, PRINT_WAIT_MS\)/);
-  assert.match(print, /Promise\.race\(\[Promise\.all\(\[fonts, image\]\), timeout\]\)\.then\(\(\) => setTimeout\(print, 100\)\)/);
+  assert.match(print, /Promise\.race\(\[Promise\.all\(\[fonts, \.\.\.images\]\), timeout\]\)\.then\(\(\) => setTimeout\(print, 100\)\)/);
 });
 
 test('print: unpaid or failed online orders say «پرداخت‌نشده», never «پرداخت‌شده», and show no tracking code', () => {

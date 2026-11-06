@@ -1261,8 +1261,9 @@ function orderPrintHtml(o, items, origin = '') {
   const method = SHIPPING_LABEL[o.shipping_method] || o.shipping_method || '—';
   const ltr = (s) => `<span class="ltr">${escapeHtml(s)}</span>`;
   const font = (file) => escapeHtml(String(origin || '') + '/fonts/' + file);
-  // The storefront's line-art daffodil (images/motif-flower.png), reused as a
-  // faint watermark behind the packing slip — never behind the label.
+  // The storefront's line-art daffodil (images/motif-flower.png), reused as
+  // two faint watermarks: one behind the header (top-right, mirrored) and
+  // one behind the packing slip (bottom-left) — never behind the label.
   const watermark = escapeHtml(String(origin || '') + '/images/motif-flower.png');
   return `<!doctype html>
 <html lang="fa" dir="rtl">
@@ -1310,19 +1311,27 @@ function orderPrintHtml(o, items, origin = '') {
   .box { display: inline-block; width: 5mm; height: 5mm; border: 1.5px solid #000; vertical-align: middle; margin-inline-start: 2mm; }
   .foot { margin-top: 4mm; padding-top: 2mm; border-top: 1px solid #000; display: flex; justify-content: space-between; font-size: 10pt; }
   .block, .totals, .checks, .foot { page-break-inside: avoid; break-inside: avoid; }
-  /* The watermark: behind the items, totals and footer, bleeding off the
-     bottom-left corner; faint and grey so it never gets in the way of the
+  /* The watermarks: faint and grey so they never get in the way of the
      text, and forced to print (browsers drop images styled as
-     backgrounds). The slip clips it, so it can never add a page. */
-  .slip { position: relative; overflow: hidden; overflow: clip; }
-  .slip > *:not(.watermark) { position: relative; z-index: 1; }
+     backgrounds). Each one is clipped by its own box — the header (.top)
+     or the slip — so it can never add a page or reach the label. */
   .watermark {
-    position: absolute; z-index: 0; bottom: -14mm; inset-inline-end: -20mm; width: 120mm; height: auto;
+    position: absolute; z-index: 0; height: auto;
     /* motif-flower.png's lines are themselves only ~42% opaque, so 0.3 here
        prints them like solid lines at ~0.12: faint, never in the way. */
     opacity: 0.3; filter: grayscale(1); pointer-events: none;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
+  /* Top-right, behind the header: mirrored and tilted so it isn't an
+     obvious copy of the bottom one; only its bloom shows, the rest is
+     clipped at the header's bottom edge (above the sender box). */
+  .top { position: relative; overflow: hidden; overflow: clip; }
+  .top > *:not(.watermark) { position: relative; z-index: 1; }
+  .watermark-top { top: -24mm; right: -12mm; width: 100mm; transform: scaleX(-1) rotate(-8deg); }
+  /* Bottom-left, behind the items, totals and footer. */
+  .slip { position: relative; overflow: hidden; overflow: clip; }
+  .slip > *:not(.watermark) { position: relative; z-index: 1; }
+  .slip > .watermark { bottom: -14mm; inset-inline-end: -20mm; width: 120mm; }
   .screen-only { margin: 12px auto; max-width: 186mm; text-align: center; font-family: inherit; }
   .screen-only button { font: inherit; padding: 8px 22px; border: 1px solid #000; background: #fff; cursor: pointer; }
   @media print { .screen-only { display: none; } }
@@ -1331,8 +1340,11 @@ function orderPrintHtml(o, items, origin = '') {
 <body>
 <div class="screen-only"><button type="button" id="print-again">چاپ دوباره</button></div>
 <div class="page">
+  <div class="top">
+  <img class="watermark watermark-top" src="${watermark}" alt="" aria-hidden="true">
   <div class="head"><span class="brand ltr">Glow Home</span><span class="doc">برگه سفارش</span></div>
   <div class="meta"><span class="code ltr">${escapeHtml(o.code)}</span><span>${escapeHtml(date)}</span></div>
+  </div>
 
   <div class="block label-area">
     <div class="sender"><b>فرستنده:</b> ${escapeHtml(SHOP_SENDER_NAME)} — ${ltr(phoneDisplay(SHOP_SENDER_PHONE))}</div>
@@ -1402,21 +1414,24 @@ function printOrder(id) {
     win.print();
   };
   win.document.getElementById('print-again').addEventListener('click', print);
-  // Wait for the font and the watermark image — but never more than
-  // PRINT_WAIT_MS: if either fails or hangs, print anyway (a watermark that
+  // Wait for the font and both watermark images — but never more than
+  // PRINT_WAIT_MS: if any fails or hangs, print anyway (a watermark that
   // didn't load is removed; the page is fine without it).
   const fonts = (win.document.fonts && win.document.fonts.ready) || Promise.resolve();
-  const img = win.document.querySelector('.watermark');
-  const image = new Promise((resolve) => {
-    if (!img || (img.complete && img.naturalWidth)) return resolve();
-    img.addEventListener('load', resolve);
-    img.addEventListener('error', () => {
-      img.remove();
-      resolve();
-    });
-  });
+  const images = [...win.document.querySelectorAll('.watermark')].map(
+    (img) =>
+      new Promise((resolve) => {
+        const failed = () => {
+          img.remove();
+          resolve();
+        };
+        if (img.complete) return img.naturalWidth ? resolve() : failed();
+        img.addEventListener('load', resolve);
+        img.addEventListener('error', failed);
+      })
+  );
   const timeout = new Promise((resolve) => setTimeout(resolve, PRINT_WAIT_MS));
-  Promise.race([Promise.all([fonts, image]), timeout]).then(() => setTimeout(print, 100));
+  Promise.race([Promise.all([fonts, ...images]), timeout]).then(() => setTimeout(print, 100));
 }
 
 async function updateOrderStatus(id, status) {
