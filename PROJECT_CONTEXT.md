@@ -194,16 +194,20 @@ decisions from code alone — read this before making structural changes.
   row). Tests: `city-fees.test.js`, `checkout-city.test.js`,
   `tehran-fee.test.js`.
 - **Snapp Pay installment banner**: a blue banner at the very top of
-  checkout (above ورود) — static "برای خرید اقساطی با اسنپ‌پی..." prompt
-  plus a بیشتر/بستن toggle button (`state.snappPayOpen`, same accordion
-  pattern as the FAQ page's `state.faqOpen`) that expands an inline
-  7-step purchase-flow card (`SNAPP_PAY_STEPS` in `app.js`, exact business-
-  provided copy — don't reword), pushing the rest of the page down rather
-  than overlaying it. Built as real HTML/CSS blue "step pill" rows, not an
-  embedded image. Ends with `images/snapp-pay-logo.png` again, larger.
-  This replaced an earlier version of the banner that asked customers to
-  screenshot their cart and message a WhatsApp number — that flow and its
-  icon/CSS (`whatsappIcon()`, `.whatsapp-number`) are gone entirely now.
+  checkout (above ورود), `snappPayBannerHtml()` in `app.js` — the two Snapp
+  Pay logos (plain images, never links), the line "برای خرید اقساطی با
+  اسنپ‌پی در ۴ قسط..." and a بیشتر/بستن toggle (`state.snappPayOpen`, same
+  accordion pattern as the FAQ page's `state.faqOpen`). Open, it pushes the
+  page down and shows only `SNAPP_PAY_MSG` («...به سحر پیام بدهید تا خرید
+  شما را با هم نهایی کنیم.») and the checkout's own contact buttons,
+  `contactLinksHtml()` (shared with `payByContactHtml()`): WhatsApp with the
+  cart prefilled plus `SNAPP_PAY_WA_LINE` (`whatsAppHref('snapp')`, link
+  marked `data-wa="snapp"` so `refreshWhatsAppLink` keeps that line),
+  Telegram, Instagram — each hidden when its `COPY` value is empty. There
+  is deliberately no link to Snapp Pay's website anywhere, no order is
+  created and nothing is sent; Sahar finalises the instalment purchase in
+  the chat. The old 7-step list and its button to Snapp Pay are gone.
+  Tests: `snapp-pay.test.js` (also scans the repo for any Snapp Pay URL).
 - **Email**: two emails, both to the shop, via Resend's API (plain
   `fetch()`, no SDK), from two copies of the same small sender:
   - the contact form, through `api/_email.js` on Vercel (env vars in
@@ -520,7 +524,7 @@ the base size. The storefront drops any cart line it can't price —
 
 - **Snapp Pay API** — no Snapp Pay integration (ZarinPal online payment is
   built: see "Payment server"). Checkout's Snapp Pay banner (see above)
-  walks the customer through a manual, human-in-the-loop flow (direct
-  message to the shop, admin sends a payment link outside this codebase).
+  only asks the customer to message Sahar on WhatsApp / Telegram /
+  Instagram; the instalment purchase is arranged by hand in that chat.
 - **Customer accounts** — guest checkout only, no login, no order history
   for customers.

@@ -108,6 +108,7 @@ function contactEnv({ pay = 'card', online = ONLINE_PAYMENT, phone = COPY.contac
      ${fnSrc('whatsappIcon')}
      ${fnSrc('telegramHref')}
      ${fnSrc('telegramIcon')}
+     ${fnSrc('contactLinksHtml')}
      ${fnSrc('payByContactHtml')}
      ${fnSrc('payByContactBarHtml')}
      ${fnSrc('refreshWhatsAppLink')}

@@ -1641,19 +1641,6 @@ function screenCart() {
   </div>`;
 }
 
-// Business-provided copy, exact wording — see the checkout banner's
-// expanded accordion in screenCheckout(). Numbering is generated, not part
-// of the given text.
-const SNAPP_PAY_STEPS = [
-  'کالای مورد نظرتون رو انتخاب و برای فروشگاه تو دایرکت ارسال کنید.',
-  'جهت نهایی کردن خرید خود، روی لینک پرداخت که از طرف ادمین براتون ارسال میشه کلیک کنید.',
-  'توجه داشته باشید قبل از کلیک روی لینک، وی‌پی‌ان خود را خاموش کنید.',
-  'قیمت مشخص شده رو به صورت دقیق وارد نمایید و گزینه تایید را انتخاب کنید.',
-  'شماره تماسی که با آن اعتبار اسنپ‌پی دارید را وارد نمایید.',
-  'پس از بررسی مشخصات اقساط، دکمه تایید را بزنید و قسط اول را واریز نمایید.',
-  'کد رهگیری رو با استفاده از دکمه کپی موجود کپی کنید و برای فروشگاه در دایرکت ارسال کنید.',
-];
-
 function screenCheckout() {
   syncShippingToCity(); // city may have changed since the last render (see the #city 'change' listener)
   const t = totals();
@@ -1676,30 +1663,7 @@ function screenCheckout() {
   <div class="shell screen">
     <img class="page-motif" src="images/motif-flower.png" alt="">
     <h1 class="page-title">تسویه‌حساب</h1>
-    <div class="alert alert-whatsapp snapp-pay-banner ${state.snappPayOpen ? 'open' : ''}" style="margin-top:18px">
-      <div class="snapp-pay-logo-header">
-        <img class="snapp-pay-logo" src="images/snapp-pay-logo.png" alt="Snapp Pay" onerror="this.style.display='none'">
-        <img class="snapp-pay-logo snapp-pay-logo-fa" src="images/snapp-pay-logo-fa.png" alt="اسنپ‌پی" onerror="this.style.display='none'">
-      </div>
-      <span>برای خرید اقساطی با اسنپ‌پی در ۴ قسط گزینه بیشتر کلیک کن</span>
-      <button
-        class="snapp-pay-more"
-        data-act="snapp-pay-toggle"
-        aria-expanded="${state.snappPayOpen}"
-        aria-controls="snapp-pay-steps"
-      >${state.snappPayOpen ? 'بستن' : 'بیشتر'}</button>
-      <div class="snapp-pay-steps" id="snapp-pay-steps">
-        <h4>گام‌های خرید از طریق اسنپ‌پی:</h4>
-        <ol class="snapp-pay-step-list">
-          ${SNAPP_PAY_STEPS.map(
-            (step, i) => `<li><span class="snapp-pay-step-num">${FA(i + 1)}</span><span>${esc(step)}</span></li>`
-          ).join('')}
-        </ol>
-        <div class="snapp-pay-cta-row">
-          <a class="btn snapp-pay-cta" href="https://social.snapppay.site/0r3z3" target="_blank" rel="noopener noreferrer">خرید اقساط</a>
-        </div>
-      </div>
-    </div>
+    ${snappPayBannerHtml()}
     <div class="checkout-layout" style="margin-top:22px">
       <div>
         <section class="checkout-step">
@@ -1862,10 +1826,13 @@ function contactTelHref() {
   return intl ? 'tel:+' + intl : '';
 }
 
+// The extra line in the WhatsApp message sent from the Snapp Pay banner.
+const SNAPP_PAY_WA_LINE = 'می‌خواهم به صورت اقساطی با اسنپ‌پی پرداخت کنم.';
+
 /** The prefilled WhatsApp message: a greeting, each cart line (name, size /
  * shade / colour when chosen, quantity), the total, and the city if typed —
  * nothing else from the form. */
-function contactMessage() {
+function contactMessage(intent) {
   const t = totals();
   const lines = t.rows.map((r) => {
     const { height, shade } = parseCartKey(r.cartKey);
@@ -1874,9 +1841,13 @@ function contactMessage() {
   });
   const city = String(state.form.city || '').trim().slice(0, 40);
   return [
-    state.pay === 'card' && ONLINE_PAYMENT.enabled
-      ? 'سلام، می‌خواهم سفارشم را با کارت به کارت پرداخت کنم.'
-      : 'سلام، می‌خواهم این سفارش را ثبت کنم.',
+    ...(intent === 'snapp'
+      ? ['سلام، می‌خواهم این سفارش را ثبت کنم.', SNAPP_PAY_WA_LINE]
+      : [
+          state.pay === 'card' && ONLINE_PAYMENT.enabled
+            ? 'سلام، می‌خواهم سفارشم را با کارت به کارت پرداخت کنم.'
+            : 'سلام، می‌خواهم این سفارش را ثبت کنم.',
+        ]),
     ...lines,
     'جمع: ' + money(t.total),
     ...(city ? ['شهر: ' + city] : []),
@@ -1891,10 +1862,11 @@ function messageOnlyWhatsAppHref() {
   return intl ? 'https://wa.me/' + intl : '';
 }
 
-/** The checkout WhatsApp link with the cart prefilled; "" with no number. */
-function whatsAppHref() {
+/** The checkout WhatsApp link with the cart prefilled; "" with no number.
+ * intent 'snapp' (the Snapp Pay banner) adds the instalment line. */
+function whatsAppHref(intent) {
   const intl = contactWhatsappIntl();
-  return intl ? 'https://wa.me/' + intl + '?text=' + encodeURIComponent(contactMessage()) : '';
+  return intl ? 'https://wa.me/' + intl + '?text=' + encodeURIComponent(contactMessage(intent)) : '';
 }
 
 /** WhatsApp's logo (filled, so not one of the stroke icons in icon()). */
@@ -1918,29 +1890,68 @@ function telegramIcon(cls = 'icon icon-sm') {
   );
 }
 
-/** The checkout box: WhatsApp (with the cart), Telegram, Instagram, the
- * contact page. WhatsApp, Telegram and the «یا تماس بگیرید» line each show
- * only while data.js has them; Instagram and the contact page are always
- * there. The first button shown is the main one. */
-function payByContactHtml() {
-  const wa = whatsAppHref();
+/** The WhatsApp (`wa`, already made), Telegram and Instagram buttons, each
+ * only while data.js has it; the first one shown is the main one. Used by
+ * the checkout box and the Snapp Pay banner. `waAttr` marks the WhatsApp
+ * link for refreshWhatsAppLink(). */
+function contactLinksHtml(wa, waAttr = 'data-wa') {
   const tg = telegramHref();
+  const ig = String(COPY.instagramUrl || '').trim();
+  return [
+    wa ? `<a class="btn btn-accent" ${waAttr} href="${esc(wa)}" target="_blank" rel="noopener noreferrer">${whatsappIcon()}ارسال پیام در واتساپ</a>` : '',
+    tg ? `<a class="btn ${wa ? 'btn-ghost' : 'btn-accent'}" href="${esc(tg)}" target="_blank" rel="noopener noreferrer">${telegramIcon()}پیام در تلگرام</a>` : '',
+    ig ? `<a class="btn ${wa || tg ? 'btn-ghost' : 'btn-accent'}" href="${esc(ig)}" target="_blank" rel="noopener">${icon('instagram', 'icon icon-sm')}پیام در اینستاگرام</a>` : '',
+  ]
+    .filter(Boolean)
+    .join('\n            ');
+}
+
+/** The checkout box: WhatsApp (with the cart), Telegram, Instagram, the
+ * contact page. WhatsApp, Telegram, Instagram and the «یا تماس بگیرید» line
+ * each show only while data.js has them; the contact page is always there.
+ * The first button shown is the main one. */
+function payByContactHtml() {
   const tel = contactTelHref();
   return `
         <div class="pay-contact" role="note">
           <p>${state.pay === 'card' && ONLINE_PAYMENT.enabled ? CARD_TO_CARD_MSG : ONLINE_OFF_MSG}</p>
           <div class="pay-contact-links">
-            ${wa ? `<a class="btn btn-accent" data-wa href="${esc(wa)}" target="_blank" rel="noopener noreferrer">${whatsappIcon()}ارسال پیام در واتساپ</a>` : ''}
-            ${tg ? `<a class="btn ${wa ? 'btn-ghost' : 'btn-accent'}" href="${esc(tg)}" target="_blank" rel="noopener noreferrer">${telegramIcon()}پیام در تلگرام</a>` : ''}
-            <a class="btn ${wa || tg ? 'btn-ghost' : 'btn-accent'}" href="${esc(COPY.instagramUrl)}" target="_blank" rel="noopener">${icon(
-    'instagram',
-    'icon icon-sm'
-  )}پیام در اینستاگرام</a>
+            ${contactLinksHtml(whatsAppHref())}
             <button class="btn btn-ghost" data-nav="#/contact">صفحه‌ی تماس با ما</button>
           </div>
         </div>${
           tel ? `\n        <p class="pay-contact-call">یا تماس بگیرید: <a class="ltr" href="${tel}">${esc(COPY.contactPhone)}</a></p>` : ''
         }`;
+}
+
+const SNAPP_PAY_MSG =
+  'برای خرید اقساطی با اسنپ‌پی، از طریق تلگرام، واتساپ یا اینستاگرام به سحر پیام بدهید تا خرید شما را با هم نهایی کنیم.';
+
+/** Checkout's Snapp Pay banner: the logos (plain images), a line and the
+ * بیشتر/بستن toggle (state.snappPayOpen). Open, it shows SNAPP_PAY_MSG and
+ * the WhatsApp (cart + instalment line), Telegram and Instagram buttons.
+ * No link to Snapp Pay, no order, no request. */
+function snappPayBannerHtml() {
+  const open = state.snappPayOpen;
+  return `<div class="alert alert-whatsapp snapp-pay-banner ${open ? 'open' : ''}" style="margin-top:18px">
+      <div class="snapp-pay-logo-header">
+        <img class="snapp-pay-logo" src="images/snapp-pay-logo.png" alt="Snapp Pay" onerror="this.style.display='none'">
+        <img class="snapp-pay-logo snapp-pay-logo-fa" src="images/snapp-pay-logo-fa.png" alt="اسنپ‌پی" onerror="this.style.display='none'">
+      </div>
+      <span>برای خرید اقساطی با اسنپ‌پی در ۴ قسط گزینه بیشتر کلیک کن</span>
+      <button
+        class="snapp-pay-more"
+        data-act="snapp-pay-toggle"
+        aria-expanded="${open}"
+        aria-controls="snapp-pay-body"
+      >${open ? 'بستن' : 'بیشتر'}</button>
+      <div class="snapp-pay-body" id="snapp-pay-body">
+        <p>${SNAPP_PAY_MSG}</p>
+        <div class="pay-contact-links">
+          ${contactLinksHtml(whatsAppHref('snapp'), 'data-wa="snapp"')}
+        </div>
+      </div>
+    </div>`;
 }
 
 /** The mobile action bar's button when online payment isn't the choice:
@@ -1954,10 +1965,11 @@ function payByContactBarHtml() {
 
 // The city field and the cart update the page without re-rendering it, so a
 // WhatsApp link made at render time could carry an old total or city: make
-// it again the moment it is pressed or clicked. Never renders, never sends.
+// it again the moment it is pressed or clicked (the Snapp Pay banner's one,
+// data-wa="snapp", keeps its instalment line). Never renders, never sends.
 function refreshWhatsAppLink(e) {
   const a = e.target && e.target.closest ? e.target.closest('a[data-wa]') : null;
-  const href = a ? whatsAppHref() : '';
+  const href = a ? whatsAppHref(a.getAttribute && a.getAttribute('data-wa') === 'snapp' ? 'snapp' : undefined) : '';
   if (href) a.href = href;
 }
 document.addEventListener('pointerdown', refreshWhatsAppLink, true);

@@ -103,8 +103,8 @@
      images/snapp-pay-logo.png's background (#008efa) — deliberately its
      own variable rather than reusing --color-blue-700 above, since the two
      don't match and blue-700 is already used elsewhere in this same banner
-     (the step pills, "بیشتر" text) for a purpose unrelated to brand-matching
-     the logo art. */
+     (the "بیشتر" text) for a purpose unrelated to brand-matching the logo
+     art. */
   --color-snapp-blue: #008efa;
 
   --radius-sm: 8px;
@@ -1358,7 +1358,7 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
 }
 /* Logo header — its own full-width row above the banner's text (width:100%
    on a flex item forces a wrap in the parent's flex-wrap row, same trick
-   .snapp-pay-steps uses below). Background matches the English logo's own
+   .snapp-pay-body uses below). Background matches the English logo's own
    art exactly (--color-snapp-blue) so that logo's square canvas blends into
    the header with no visible edge, rather than sitting in a box of a
    different blue. */
@@ -1401,42 +1401,13 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.9; }
 /* Expanded accordion — hidden by default, shown inline (pushes the rest of
    the page down, not an overlay) when .snapp-pay-banner has .open. Same
    show/hide-via-parent-class pattern as .faq-item.open .faq-a elsewhere in
-   this file. */
-.snapp-pay-steps { display: none; width: 100%; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--color-blue-300); }
-.snapp-pay-banner.open .snapp-pay-steps { display: block; }
-.snapp-pay-steps h4 { margin: 0 0 10px; font-size: 15px; font-weight: 700; }
-
-.snapp-pay-step-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.snapp-pay-step-list li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--color-blue-700);
-  color: #fff;
-  border-radius: var(--radius-pill);
-  padding: 10px 16px;
-  font-size: 13.5px;
-  line-height: 1.7;
-}
-.snapp-pay-step-num {
-  flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: #fff;
-  color: var(--color-blue-700);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 12px;
-}
-/* CTA row — flex-end lands at the visual left on this RTL site (main-axis
-   end = left when dir="rtl"), same convention as .snapp-pay-more's
-   margin-inline-start:auto above. */
-.snapp-pay-cta-row { display: flex; justify-content: flex-end; margin-top: 16px; }
-.snapp-pay-cta { background: var(--color-blue-700); color: #fff; }
-.snapp-pay-cta:hover { background: #17497f; } /* ~12% darker than --color-blue-700; no darker blue token exists yet */
+   this file. Holds a line of text and the checkout's own contact buttons
+   (.pay-contact-links, same look); side by side when there is room. */
+.snapp-pay-body { display: none; width: 100%; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--color-blue-300); }
+.snapp-pay-banner.open .snapp-pay-body { display: block; }
+.snapp-pay-body p { margin: 0 0 12px; font-size: 14.5px; line-height: 1.9; }
+.snapp-pay-body .pay-contact-links { flex-direction: row; flex-wrap: wrap; }
+.snapp-pay-body .pay-contact-links .btn { flex: 1 1 200px; width: auto; }
 
 .checkout-layout { display: grid; grid-template-columns: 1.5fr 1fr; gap: 34px; align-items: start; }
 .checkout-step { margin-bottom: 34px; }
