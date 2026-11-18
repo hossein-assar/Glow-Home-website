@@ -51,6 +51,8 @@ function storefront(catalog) {
     fnSrc('sizeShadesOf'),
     fnSrc('defaultShade'),
     fnSrc('shadeOption'),
+    fnSrc('applyCampaign'),
+    fnSrc('saleOf'),
     fnSrc('cartLineData'),
     fnSrc('cartKeyFor'),
     fnSrc('cardCartKey'),

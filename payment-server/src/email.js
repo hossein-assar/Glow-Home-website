@@ -94,6 +94,21 @@ export function faDateTime(when) {
   );
 }
 
+/** The price a line had before its campaign; unit_price when none (old
+ * orders, fees, lines sold at the list price). */
+export function lineListPrice(it) {
+  const list = Number(it.list_price);
+  return Number.isSafeInteger(list) && list > it.unit_price ? list : it.unit_price;
+}
+
+/** «قیمت اصلی … — تخفیف «name»» for a discounted line, wrapped in
+ * open/close; '' otherwise. */
+export function lineDiscountNote(it, open, close) {
+  const list = lineListPrice(it);
+  if (!(list > it.unit_price)) return '';
+  return `${open}قیمت اصلی ${money(list)} — تخفیف${it.campaign_name ? ` «${escapeHtml(it.campaign_name)}»` : ''}${close}`;
+}
+
 export function paidOrderSubject(order) {
   return `سفارش جدید پرداخت‌شده — ${order.code}`;
 }
@@ -102,13 +117,19 @@ export function paidOrderSubject(order) {
  * order: { code, customer_name, phone, address, city, postcode, note,
  * shipping_method, total, paid_at, payment_ref_id } — the card number is
  * never read (fetchOrderForEmail doesn't select it) and never used here.
- * items: order_items rows { product_id, name_fa, qty, unit_price }; rows
- * with product_id null are fees (the packaging fee). Every value is escaped.
+ * items: order_items rows { product_id, name_fa, qty, unit_price,
+ * list_price?, campaign_name? }; rows with product_id null are fees (the
+ * packaging fee). A line sold under a campaign (list_price above
+ * unit_price) shows its original price and the campaign, and the totals
+ * show «تخفیف مناسبت» so they add up. Every value is escaped.
  */
 export function paidOrderHtml(order, items = [], { banner = '' } = {}) {
   const products = items.filter((it) => it.product_id != null);
   const fees = items.filter((it) => it.product_id == null);
   const itemsSum = products.reduce((s, it) => s + it.unit_price * it.qty, 0);
+  const listSum = products.reduce((s, it) => s + lineListPrice(it) * it.qty, 0);
+  const campaignDiscount = listSum - itemsSum;
+  const campaigns = [...new Set(products.filter((it) => lineListPrice(it) > it.unit_price && it.campaign_name).map((it) => it.campaign_name))];
   const feesSum = fees.reduce((s, it) => s + it.unit_price * it.qty, 0);
   const discount = Math.max(0, itemsSum + feesSum - (Number(order.total) || 0));
   const method = SHIPPING_LABEL[order.shipping_method] || order.shipping_method || '—';
@@ -141,12 +162,12 @@ ${order.note ? row('توضیحات مشتری:', `<span style="white-space:pre-w
 <table style="border-collapse:collapse;width:100%">
 <tr style="background:#f3f3f3"><th ${td}>محصول</th><th ${td}>تعداد</th><th ${td}>قیمت واحد</th><th ${td}>جمع</th></tr>
 ${products
-  .map((it) => `<tr><td ${td}>${escapeHtml(it.name_fa)}</td><td ${td}>${faNum(it.qty)}</td><td ${tdNum}>${money(it.unit_price)}</td><td ${tdNum}>${money(it.unit_price * it.qty)}</td></tr>`)
+  .map((it) => `<tr><td ${td}>${escapeHtml(it.name_fa)}${lineDiscountNote(it, '<br><span style="color:#555;font-size:12px">', '</span>')}</td><td ${td}>${faNum(it.qty)}</td><td ${tdNum}>${money(it.unit_price)}</td><td ${tdNum}>${money(it.unit_price * it.qty)}</td></tr>`)
   .join('\n')}
 </table>
 
 <table style="border-collapse:collapse;margin:8px 0 0">
-${sumRow('جمع اقلام', money(itemsSum))}
+${campaignDiscount > 0 ? sumRow('جمع اقلام با قیمت اصلی', money(listSum)) + '\n' + sumRow(`تخفیف مناسبت${campaigns.length ? ` (${campaigns.map(escapeHtml).join('، ')})` : ''}`, '−' + money(campaignDiscount)) : sumRow('جمع اقلام', money(itemsSum))}
 ${fees.map((f) => sumRow(escapeHtml(f.name_fa), money(f.unit_price * f.qty))).join('\n')}
 ${discount > 0 ? sumRow('تخفیف', '−' + money(discount)) : ''}
 ${sumRow('مبلغ پرداخت‌شده', money(order.total), true)}

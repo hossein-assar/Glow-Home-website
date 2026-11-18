@@ -24,7 +24,7 @@ const env = new Function(
     grab(/const SHOP_INSTAGRAM = [^\n]*\n/),
     grab(/const SHOP_SENDER_NAME = [^\n]*\n/),
     grab(/const SHOP_SENDER_PHONE = [^\n]*\n/),
-    ...['money', 'escapeHtml', 'faNum', 'phoneDisplay', 'orderPaymentState', 'orderPrintHtml', 'orderCardHtml', 'paymentInfoHtml'].map(fnSrc),
+    ...['money', 'escapeHtml', 'faNum', 'phoneDisplay', 'orderPaymentState', 'lineListPrice', 'lineDiscountNote', 'orderPrintHtml', 'orderCardHtml', 'paymentInfoHtml'].map(fnSrc),
     'return { orderPrintHtml, orderCardHtml, orderPaymentState, phoneDisplay, money, SHOP_INSTAGRAM, SHOP_SENDER_NAME, SHOP_SENDER_PHONE };',
   ].join('\n')
 )();

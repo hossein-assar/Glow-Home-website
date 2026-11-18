@@ -88,6 +88,72 @@ function cityFees(rawCity) {
 }
 // ---- end of city fees ----------------------------------------------------------
 
+// ---- Campaign discounts (shared rule) -------------------------------------------
+// ⚠ This block is identical in app.js, admin/admin.js, api/orders.js and
+// payment-server/src/pricing.js (`npm test` in payment-server/ checks it).
+// A campaign (table discount_campaigns, edited in the admin «تخفیف‌ها» tab)
+// takes a whole percent (1–90) off every size and every shade of the
+// products it covers: all of them, some collections, or chosen products
+// (by slug). Each unit price is discounted on its own and rounded to the
+// nearest 1,000 Toman; fees are never discounted. Two campaigns on one
+// product never stack: the larger percent wins (on a tie, the first one).
+// Active = switched on and starts_at ≤ now < ends_at (an empty date is no
+// limit); the payment server decides with its own clock.
+const DISCOUNT_MAX_PERCENT = 90;
+const DISCOUNT_ROUND_TOMAN = 1000;
+const DISCOUNT_SCOPES = ['all', 'collections', 'products'];
+
+/** True when campaign c is valid and running at `now` (ms). now == null
+ * skips the dates (the storefront: its database read returns only running
+ * campaigns, and the visitor's clock may be wrong). */
+function campaignIsActive(c, now) {
+  if (!c || c.enabled !== true || !DISCOUNT_SCOPES.includes(c.scope)) return false;
+  const percent = Number(c.percent);
+  if (!Number.isInteger(percent) || percent < 1 || percent > DISCOUNT_MAX_PERCENT) return false;
+  if (now == null) return true;
+  const start = c.starts_at ? Date.parse(c.starts_at) : null;
+  const end = c.ends_at ? Date.parse(c.ends_at) : null;
+  if (Number.isNaN(start) || Number.isNaN(end)) return false;
+  return (start == null || start <= now) && (end == null || now < end);
+}
+
+/** True when campaign c covers product p ({ slug, collection }). */
+function campaignCovers(c, p) {
+  if (c.scope === 'all') return true;
+  if (c.scope === 'collections') return Array.isArray(c.collections) && c.collections.includes(p.collection);
+  if (c.scope === 'products') return Array.isArray(c.product_slugs) && c.product_slugs.includes(p.slug);
+  return false;
+}
+
+/** The covering campaign with the largest percent, or null. `campaigns`
+ * must already be the active ones. */
+function bestCampaignFor(p, campaigns) {
+  let best = null;
+  for (const c of Array.isArray(campaigns) ? campaigns : []) {
+    if (campaignCovers(c, p) && (!best || Number(c.percent) > Number(best.percent))) best = c;
+  }
+  return best;
+}
+
+/** price less percent, rounded to the nearest DISCOUNT_ROUND_TOMAN, never
+ * below DISCOUNT_ROUND_TOMAN nor above price. An unpriced (0, missing,
+ * not a whole number) price is returned as it is. */
+function discountedPrice(price, percent) {
+  if (!Number.isSafeInteger(price) || price <= 0) return price;
+  const pct = Math.min(DISCOUNT_MAX_PERCENT, Math.max(0, Math.floor(Number(percent) || 0)));
+  const rounded = Math.round((price * (100 - pct)) / 100 / DISCOUNT_ROUND_TOMAN) * DISCOUNT_ROUND_TOMAN;
+  return Math.min(price, Math.max(DISCOUNT_ROUND_TOMAN, rounded));
+}
+
+/** One unit at listPrice under campaign c (or none): { price, listPrice,
+ * campaign } — campaign is null when nothing comes off. */
+function applyCampaign(listPrice, c) {
+  const price = c ? discountedPrice(listPrice, c.percent) : listPrice;
+  if (!c || !(price < listPrice)) return { price: listPrice, listPrice, campaign: null };
+  return { price, listPrice, campaign: c };
+}
+// ---- end of campaign discounts ---------------------------------------------------
+
 // Which courier a city gets: پیک in Tehran, تیپاکس everywhere else.
 function shippingMethodForCity(rawCity) {
   return isTehranCity(rawCity) ? 'peyk' : 'tipax';
@@ -193,4 +259,10 @@ module.exports.withBaseSize = withBaseSize;
 module.exports.sizeLine = sizeLine;
 module.exports.cityFees = cityFees;
 module.exports.shippingMethodForCity = shippingMethodForCity;
+module.exports.campaignIsActive = campaignIsActive;
+module.exports.campaignCovers = campaignCovers;
+module.exports.bestCampaignFor = bestCampaignFor;
+module.exports.discountedPrice = discountedPrice;
+module.exports.applyCampaign = applyCampaign;
+module.exports.DISCOUNT_MAX_PERCENT = DISCOUNT_MAX_PERCENT;
 module.exports.RETIRED_ERROR = RETIRED_ERROR;

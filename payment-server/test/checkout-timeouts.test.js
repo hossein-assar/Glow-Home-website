@@ -48,6 +48,7 @@ async function start({ db: dbOver = {}, zp: zpOver = {}, timeouts = FAST } = {})
   const logs = [];
   const db = {
     async fetchProductsBySlugs(slugs) { calls.push('fetch_products'); return LIVE.filter((p) => slugs.includes(p.slug)); },
+    async fetchActiveCampaigns() { calls.push('fetch_campaigns'); return []; },
     async nextOrderCode() { calls.push('order_code'); return 'GH-1016'; },
     async createOrder(o, items) { calls.push('create_order'); const row = { id: 'o1', ...o, items }; orders.push(row); return { id: row.id, code: row.code }; },
     async setAuthority(id, a) { calls.push('save_authority'); orders[0].payment_authority = a; },
@@ -270,7 +271,7 @@ test('createDb: a Supabase server that never answers makes fetchProductsBySlugs 
   assert.ok(Date.now() - t0 < 1000);
   // supabase-js's own retries are off; ours tries a read exactly twice (db-retry.test.js)
   assert.equal(seen.length, 2);
-  assert.match(seen[0], /^https:\/\/glow-home\.ir\/sb\/rest\/v1\/products\?select=id%2Cslug%2Cname_fa%2Cprice%2Cheight_cm%2Cvariants%2Cshade_types%2Ccolors%2Cin_stock&slug=in\.%28gisoo%29$/);
+  assert.match(seen[0], /^https:\/\/glow-home\.ir\/sb\/rest\/v1\/products\?select=id%2Cslug%2Cname_fa%2Ccollection%2Cprice%2Cheight_cm%2Cvariants%2Cshade_types%2Ccolors%2Cin_stock&slug=in\.%28gisoo%29$/);
 });
 
 // ---- storefront -----------------------------------------------------------------------

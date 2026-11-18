@@ -193,6 +193,60 @@ decisions from code alone — read this before making structural changes.
   placed before the Tehran fee keep their stored lines and totals (no fee
   row). Tests: `city-fees.test.js`, `checkout-city.test.js`,
   `tehran-fee.test.js`.
+- **Discount campaigns («تخفیف‌ها» admin tab)**: Sahar runs occasion
+  discounts (یلدا, نوروز…) with no code change. Table `discount_campaigns`
+  (`supabase/migration-discount-campaigns.sql`): name (shown to customers),
+  whole `percent` 1–90, `scope` `all` / `collections` (+ `collections[]`,
+  the 4 collection keys) / `products` (+ `product_slugs[]`), optional
+  `starts_at` / `ends_at`, `enabled`. The admin picks Jalali dates (year /
+  month / day dropdowns, converted in admin.js, checked day by day against
+  ICU's Persian calendar in the tests); a campaign starts 00:00 Tehran time
+  on its first day and `ends_at` is 00:00 of the day after its last
+  (exclusive). Tehran is fixed UTC+03:30 (no DST since 2022).
+  - **One rule, four identical copies**: the `// ---- Campaign discounts
+    (shared rule)` block in `app.js`, `admin/admin.js`, `api/orders.js` and
+    `payment-server/src/pricing.js` (`discount-campaigns.test.js` keeps them
+    equal): `campaignIsActive` (on, valid percent, `starts_at ≤ now <
+    ends_at`), `campaignCovers`, `bestCampaignFor` (the larger percent
+    wins, never stacked; tie = first), `discountedPrice` (rounded to the
+    nearest 1,000 Toman, never below 1,000 nor above the price, unpriced
+    untouched, capped at 90%), `applyCampaign`. It is applied to each
+    size's and each shade's OWN price, so stored prices never change.
+  - **The payment server is the authority**: it reads the campaigns itself
+    (service role, `fetchActiveCampaigns`; a missing table = none, any
+    other error fails the checkout), filters them with its own clock and
+    prices every line. A discounted line stores `unit_price` = the price
+    charged plus `list_price` and `campaign_name` (nullable columns on
+    `order_items`; undiscounted lines don't send them, so orders work as
+    before). The packaging fee is added after discounts, never discounted;
+    ZarinPal still gets `total × 10`. The browser sends `expected_total`
+    (the total on screen); if the server's total differs (a campaign ended
+    or started, a price changed) it answers **409 `price_changed`** with
+    its total — no order, no ZarinPal call — and the storefront reloads
+    prices + campaigns (`refreshPrices()`), shows the new total and asks
+    the customer to press «پرداخت آنلاین» again. `expected_total` is never
+    used to price anything; a request without it (an old tab) is priced
+    as before.
+  - **Storefront**: reads `discount_campaigns` with the catalog; RLS
+    returns only active rows (database `now()`), so the visitor's clock is
+    never used. Unreadable → full prices (the server's 409 covers any
+    difference). Cards, the product page (+ «تخفیف «name» — روی همه‌ی
+    اندازه‌ها و شیدها», and the size/shade pickers) and cart rows show the
+    old price struck through, the new price and «٪N تخفیف»; «جمع کالاها» is
+    at list prices and «تخفیف» is the amount saved. Cart keys don't change.
+  - **Admin tab**: form with Persian validation errors, a preview table
+    (product, price now, price after, notes: no price / a bigger campaign
+    wins / all sizes and shades / provisional / out of stock), list with
+    status (فعال / زمان‌بندی‌شده / پایان‌یافته / خاموش — display only) and
+    edit / stop-start / delete. At ≤ 600 px both tables become cards.
+  - **Orders**: the admin card, the printed order and the paid-order email
+    show «قیمت اصلی … — تخفیف «name»» under a discounted line, and the totals
+    «جمع اقلام با قیمت اصلی» + «تخفیف مناسبت (name)» so they add up to the
+    total. Old orders (no `list_price`) look exactly as before. Revenue
+    (`orders.total`) and best-sellers (name + qty) are unchanged.
+  - **Deploy order**: SQL → payment server → site; only then create a
+    campaign. Discount codes stay none (`DISCOUNT_CODES = {}`).
+  Tests: `discount-campaigns.test.js`.
 - **Snapp Pay installment banner**: a blue banner at the very top of
   checkout (above ورود), `snappPayBannerHtml()` in `app.js` — the two Snapp
   Pay logos (plain images, never links), the line "برای خرید اقساطی با

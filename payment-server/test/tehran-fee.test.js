@@ -27,7 +27,7 @@ const admin = new Function(
     grab(/const SHOP_INSTAGRAM = [^\n]*\n/),
     grab(/const SHOP_SENDER_NAME = [^\n]*\n/),
     grab(/const SHOP_SENDER_PHONE = [^\n]*\n/),
-    ...['money', 'escapeHtml', 'faNum', 'phoneDisplay', 'orderPaymentState', 'orderPrintHtml', 'orderCardHtml', 'paymentInfoHtml'].map(fnSrc),
+    ...['money', 'escapeHtml', 'faNum', 'phoneDisplay', 'orderPaymentState', 'lineListPrice', 'lineDiscountNote', 'orderPrintHtml', 'orderCardHtml', 'paymentInfoHtml'].map(fnSrc),
     'return { orderPrintHtml, orderCardHtml, money };',
   ].join('\n')
 )();

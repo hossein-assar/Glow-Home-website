@@ -137,7 +137,7 @@ test('a key with no height is the base size, as before', () => {
 });
 
 test('the payment server reads height_cm with the product', () => {
-  assert.match(dbJs, /\.select\('id, slug, name_fa, price, height_cm, variants, shade_types, colors, in_stock'\)/);
+  assert.match(dbJs, /\.select\('id, slug, name_fa, collection, price, height_cm, variants, shade_types, colors, in_stock'\)/);
 });
 
 test('shade-type products are unchanged: strict shade keys, no base size added', () => {
@@ -165,7 +165,7 @@ function storefront(state) {
   const code = [
     fnSrc(appJs, 'parseCartKey'),
     grab(appJs, /const SHADE_TYPES = [^\n]*\n/),
-    ...['hasShadeTypes', 'shadeTypesOf', 'sizeShadesOf', 'defaultShade', 'shadeOption', 'cartLineData', 'cartKeyFor', 'cardCartKey', 'addToCart', 'screenProduct'].map((n) => fnSrc(appJs, n)),
+    ...['applyCampaign', 'saleOf', 'saleBadgeHtml', 'salePriceHtml', 'hasShadeTypes', 'shadeTypesOf', 'sizeShadesOf', 'defaultShade', 'shadeOption', 'cartLineData', 'cartKeyFor', 'cardCartKey', 'addToCart', 'screenProduct'].map((n) => fnSrc(appJs, n)),
     'return { cartKeyFor, cardCartKey, cartLineData, addToCart, screenProduct };',
   ].join('\n');
   const fns = new Function(

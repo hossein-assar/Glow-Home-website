@@ -134,7 +134,7 @@ function storefront(state = { cart: {}, favs: {}, selectedShade: 'plain', select
   const code = [
     fnSrc(appJs, 'parseCartKey'),
     appJs.match(/const SHADE_TYPES = [^\n]*\n/)[0],
-    ...['hasShadeTypes', 'shadeTypesOf', 'sizeShadesOf', 'defaultShade', 'shadeOption', 'cartLineData', 'cartKeyFor', 'cardCartKey', 'addToCart', 'screenProduct'].map((n) => fnSrc(appJs, n)),
+    ...['applyCampaign', 'saleOf', 'saleBadgeHtml', 'salePriceHtml', 'hasShadeTypes', 'shadeTypesOf', 'sizeShadesOf', 'defaultShade', 'shadeOption', 'cartLineData', 'cartKeyFor', 'cardCartKey', 'addToCart', 'screenProduct'].map((n) => fnSrc(appJs, n)),
     'return { cardCartKey, cartLineData, addToCart, screenProduct };',
   ].join('\n');
   const fns = new Function(

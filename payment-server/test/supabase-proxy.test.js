@@ -129,12 +129,17 @@ test('vercel.json: data and sessions are never cached; public photos are cached 
 function catalogEnv(tries, { tryMs = [10000, 5000] } = {}) {
   const state = { catalog: 'loading', cart: {}, route: 'home' };
   const renders = [];
-  const loader = grab(appJs, /const CATALOG_TRY_MS = [\s\S]*?\nasync function loadProductsFromSupabase\(\) \{[\s\S]*?\n}\n/)
+  const loader = grab(appJs, /const CATALOG_TRY_MS = [\s\S]*?\nasync function loadProductsFromSupabase\(\) \{[\s\S]*?\nfunction applyCatalog\(data\) \{[\s\S]*?\n}\n/)
     .replace(/const CATALOG_TRY_MS = \[[^\]]*\];/, `const CATALOG_TRY_MS = ${JSON.stringify(tryMs)};`)
     .replace('const CATALOG_RETRY_PAUSE_MS = 1000;', 'const CATALOG_RETRY_PAUSE_MS = 1;');
   let calls = 0;
   const sb = {
-    from: () => {
+    from: (table) => {
+      // the campaigns read (after the catalog) doesn't count as a catalog try
+      if (table === 'discount_campaigns') {
+        const c = { select: () => c, abortSignal: () => Promise.resolve({ data: [], error: null }) };
+        return c;
+      }
       const q = {
         select: () => q,
         order: () => q,
@@ -154,7 +159,8 @@ function catalogEnv(tries, { tryMs = [10000, 5000] } = {}) {
   const env = { PRODUCTS: 'data.js catalog', ITEMS: [] };
   const api = new Function(
     'state', 'render', 'getSupabaseClient', 'env',
-    `let PRODUCTS = env.PRODUCTS, PRICE, PROVISIONAL, OUT_OF_STOCK, ITEMS = [];
+    `let PRODUCTS = env.PRODUCTS, PRICE, PROVISIONAL, OUT_OF_STOCK, ITEMS = [], CAMPAIGNS = [];
+     const campaignIsActive = () => true;
      const HEIGHT_UNKNOWN = -1, saveStore = () => {}, hasShadeTypes = () => false, cartLineData = () => null, parseCartKey = (k) => ({ id: k });
      const byId = (id) => ITEMS.find((p) => p.id === id);
      function buildItems() { ITEMS = PRODUCTS.map((p) => ({ ...p })); env.ITEMS = ITEMS; }
@@ -219,10 +225,15 @@ test('product screens show loading / the Persian error with «تلاش دوبا�
 });
 
 test('the data.js catalog is never built at startup', () => {
-  // buildItems() runs only inside loadProductsFromSupabase, after a successful fetch
+  // buildItems() runs only inside applyCatalog(), which runs only after a
+  // successful fetch: in loadProductsFromSupabase and in refreshPrices
   assert.equal((appJs.match(/\n\s*buildItems\(\);/g) || []).length, 1);
+  assert.match(grab(appJs, /function applyCatalog\(data\) \{[\s\S]*?\n}\n/), /\n  buildItems\(\);/);
+  assert.equal((appJs.match(/\n\s*applyCatalog\(data\);/g) || []).length, 2);
   const loader = grab(appJs, /async function loadProductsFromSupabase\(\) \{[\s\S]*?\n}\n/);
-  assert.ok(loader.indexOf('buildItems();') > loader.indexOf("state.catalog = 'error'"));
+  assert.ok(loader.indexOf('applyCatalog(data);') > loader.indexOf("state.catalog = 'error'"));
+  const refresh = grab(appJs, /async function refreshPrices\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(refresh.indexOf('applyCatalog(data);') > refresh.indexOf('await fetchCatalog('));
   assert.match(appJs, /catalog: 'loading',/);
 });
 

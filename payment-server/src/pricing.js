@@ -101,6 +101,72 @@ export function cityFees(rawCity) {
 }
 // ---- end of city fees ----------------------------------------------------------
 
+// ---- Campaign discounts (shared rule) -------------------------------------------
+// ⚠ This block is identical in app.js, admin/admin.js, api/orders.js and
+// payment-server/src/pricing.js (`npm test` in payment-server/ checks it).
+// A campaign (table discount_campaigns, edited in the admin «تخفیف‌ها» tab)
+// takes a whole percent (1–90) off every size and every shade of the
+// products it covers: all of them, some collections, or chosen products
+// (by slug). Each unit price is discounted on its own and rounded to the
+// nearest 1,000 Toman; fees are never discounted. Two campaigns on one
+// product never stack: the larger percent wins (on a tie, the first one).
+// Active = switched on and starts_at ≤ now < ends_at (an empty date is no
+// limit); the payment server decides with its own clock.
+export const DISCOUNT_MAX_PERCENT = 90;
+export const DISCOUNT_ROUND_TOMAN = 1000;
+export const DISCOUNT_SCOPES = ['all', 'collections', 'products'];
+
+/** True when campaign c is valid and running at `now` (ms). now == null
+ * skips the dates (the storefront: its database read returns only running
+ * campaigns, and the visitor's clock may be wrong). */
+export function campaignIsActive(c, now) {
+  if (!c || c.enabled !== true || !DISCOUNT_SCOPES.includes(c.scope)) return false;
+  const percent = Number(c.percent);
+  if (!Number.isInteger(percent) || percent < 1 || percent > DISCOUNT_MAX_PERCENT) return false;
+  if (now == null) return true;
+  const start = c.starts_at ? Date.parse(c.starts_at) : null;
+  const end = c.ends_at ? Date.parse(c.ends_at) : null;
+  if (Number.isNaN(start) || Number.isNaN(end)) return false;
+  return (start == null || start <= now) && (end == null || now < end);
+}
+
+/** True when campaign c covers product p ({ slug, collection }). */
+export function campaignCovers(c, p) {
+  if (c.scope === 'all') return true;
+  if (c.scope === 'collections') return Array.isArray(c.collections) && c.collections.includes(p.collection);
+  if (c.scope === 'products') return Array.isArray(c.product_slugs) && c.product_slugs.includes(p.slug);
+  return false;
+}
+
+/** The covering campaign with the largest percent, or null. `campaigns`
+ * must already be the active ones. */
+export function bestCampaignFor(p, campaigns) {
+  let best = null;
+  for (const c of Array.isArray(campaigns) ? campaigns : []) {
+    if (campaignCovers(c, p) && (!best || Number(c.percent) > Number(best.percent))) best = c;
+  }
+  return best;
+}
+
+/** price less percent, rounded to the nearest DISCOUNT_ROUND_TOMAN, never
+ * below DISCOUNT_ROUND_TOMAN nor above price. An unpriced (0, missing,
+ * not a whole number) price is returned as it is. */
+export function discountedPrice(price, percent) {
+  if (!Number.isSafeInteger(price) || price <= 0) return price;
+  const pct = Math.min(DISCOUNT_MAX_PERCENT, Math.max(0, Math.floor(Number(percent) || 0)));
+  const rounded = Math.round((price * (100 - pct)) / 100 / DISCOUNT_ROUND_TOMAN) * DISCOUNT_ROUND_TOMAN;
+  return Math.min(price, Math.max(DISCOUNT_ROUND_TOMAN, rounded));
+}
+
+/** One unit at listPrice under campaign c (or none): { price, listPrice,
+ * campaign } — campaign is null when nothing comes off. */
+export function applyCampaign(listPrice, c) {
+  const price = c ? discountedPrice(listPrice, c.percent) : listPrice;
+  if (!c || !(price < listPrice)) return { price: listPrice, listPrice, campaign: null };
+  return { price, listPrice, campaign: c };
+}
+// ---- end of campaign discounts ---------------------------------------------------
+
 export function shippingMethodForCity(rawCity) {
   return isTehranCity(rawCity) ? 'peyk' : 'tipax';
 }
@@ -208,7 +274,7 @@ export function validateCheckoutBody(body) {
   const bad = (error) => ({ error });
   if (!body || typeof body !== 'object' || Array.isArray(body)) return bad('درخواست نامعتبر است.');
 
-  const { customer, note, items, discount_code } = body;
+  const { customer, note, items, discount_code, expected_total } = body;
   if (!customer || typeof customer !== 'object') return bad('اطلاعات مشتری ناقص است.');
 
   const name = str(customer.name);
@@ -235,6 +301,12 @@ export function validateCheckoutBody(body) {
   if (postcode && !/^[0-9]{10}$/.test(postcode)) return bad('کد پستی باید دقیقاً ۱۰ رقم باشد.');
   if (noteStr.length > LIMITS.note) return bad('یادداشت بیش از حد طولانی است.');
   if (code.length > LIMITS.discountCode) return bad('کد تخفیف نامعتبر است.');
+  // The total the customer was shown (Toman). Only ever compared with the
+  // server's own total — never used to price anything. Optional, so a page
+  // opened before this field existed can still check out.
+  if (expected_total != null && (!Number.isSafeInteger(expected_total) || expected_total < 0)) {
+    return bad('درخواست نامعتبر است.');
+  }
 
   if (!Array.isArray(items) || !items.length) return bad('سبد خرید خالی است.');
   if (items.length > LIMITS.maxItems) return bad('تعداد اقلام سبد بیش از حد مجاز است.');
@@ -259,22 +331,31 @@ export function validateCheckoutBody(body) {
       note: noteStr || null,
       items: cleanItems,
       discountCode: code || null,
+      expectedTotal: expected_total == null ? null : expected_total,
     },
   };
 }
 
 /**
- * Re-prices the cart from DB product rows. Never uses a client price.
- * products: rows with { id, slug, name_fa, price, height_cm, variants, shade_types, colors, in_stock }.
- * Returns { error } or { orderItems, subtotal, discount, discountCode, fees,
- * total, shippingMethod, shippingCost }. subtotal is the products only;
- * orderItems and total also include cityFees(city). `codes` defaults to
- * DISCOUNT_CODES (tests pass their own).
+ * Re-prices the cart from DB product rows and the server's own campaign
+ * rows. Never uses a client price.
+ * products: rows with { id, slug, name_fa, collection, price, height_cm, variants, shade_types, colors, in_stock }.
+ * campaigns: discount_campaigns rows as read by the server; only those
+ * campaignIsActive() at `now` count.
+ * Returns { error } or { orderItems, subtotal, listSubtotal, campaignDiscount,
+ * discount, discountCode, fees, total, shippingMethod, shippingCost }.
+ * subtotal is the products at the prices charged (after campaigns);
+ * listSubtotal the same at list prices. orderItems and total also include
+ * cityFees(city), added after every discount and never discounted. A
+ * discounted line also carries list_price and campaign_name. `codes`
+ * defaults to DISCOUNT_CODES (tests pass their own).
  */
-export function priceCart({ items, products, discountCode, city, codes = DISCOUNT_CODES }) {
+export function priceCart({ items, products, discountCode, city, campaigns = [], now = Date.now(), codes = DISCOUNT_CODES }) {
   const bySlug = Object.fromEntries(products.map((p) => [p.slug, p]));
+  const active = (Array.isArray(campaigns) ? campaigns : []).filter((c) => campaignIsActive(c, now));
   const orderItems = [];
   let subtotal = 0;
+  let listSubtotal = 0;
 
   for (const it of items) {
     const { id: slug, height, colorIndex, shade } = parseCartKey(it.cartKey);
@@ -301,8 +382,15 @@ export function priceCart({ items, products, discountCode, city, codes = DISCOUN
       return { error: `قیمت «${p.name_fa}» هنوز مشخص نشده است.` };
     }
 
-    subtotal += price * it.qty;
-    orderItems.push({ product_id: p.id, name_fa: label, qty: it.qty, unit_price: price });
+    // The campaign is applied to this size/shade's own price.
+    const sale = applyCampaign(price, bestCampaignFor({ slug: p.slug, collection: p.collection }, active));
+    subtotal += sale.price * it.qty;
+    listSubtotal += price * it.qty;
+    const line = { product_id: p.id, name_fa: label, qty: it.qty, unit_price: sale.price };
+    // Only on a discounted line, so an order without a campaign is stored
+    // exactly as before (and works before the new columns exist).
+    if (sale.campaign) Object.assign(line, { list_price: price, campaign_name: String(sale.campaign.name ?? '').trim().slice(0, 60) || null });
+    orderItems.push(line);
   }
 
   // Unknown codes are ignored, same as api/orders.js.
@@ -324,6 +412,8 @@ export function priceCart({ items, products, discountCode, city, codes = DISCOUN
   return {
     orderItems,
     subtotal,
+    listSubtotal,
+    campaignDiscount: listSubtotal - subtotal,
     discount,
     discountCode: code,
     fees,

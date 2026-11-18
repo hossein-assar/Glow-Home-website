@@ -80,6 +80,16 @@ export async function retryOnce(attempt, { attemptMs = ATTEMPT_MS, delayMs = RET
   }
 }
 
+/** PostgREST / Postgres "relation does not exist". */
+export function isMissingTable(error) {
+  return error && (error.code === '42P01' || error.code === 'PGRST205' || /does not exist|could not find the table/i.test(String(error.message || '')));
+}
+
+/** PostgREST / Postgres "column does not exist". */
+export function isMissingColumn(error) {
+  return error && (error.code === '42703' || error.code === 'PGRST204' || /column .* does not exist/i.test(String(error.message || '')));
+}
+
 export function createDb({
   supabaseUrl,
   serviceRoleKey,
@@ -102,10 +112,29 @@ export function createDb({
       return retry(async (signal) => {
         const { data, error } = await sb
           .from('products')
-          .select('id, slug, name_fa, price, height_cm, variants, shade_types, colors, in_stock')
+          .select('id, slug, name_fa, collection, price, height_cm, variants, shade_types, colors, in_stock')
           .in('slug', slugs)
           .abortSignal(signal);
         check(error, 'fetch products');
+        return data || [];
+      });
+    },
+
+    /**
+     * The switched-on campaigns (the service-role key reads every row; the
+     * dates are checked by priceCart with this server's clock). Before
+     * supabase/migration-discount-campaigns.sql has run there is no table:
+     * that is "no campaigns". Any other failure throws, like a products read.
+     */
+    async fetchActiveCampaigns() {
+      return retry(async (signal) => {
+        const { data, error } = await sb
+          .from('discount_campaigns')
+          .select('id, name, percent, scope, collections, product_slugs, starts_at, ends_at, enabled')
+          .eq('enabled', true)
+          .abortSignal(signal);
+        if (error && isMissingTable(error)) return [];
+        check(error, 'fetch campaigns');
         return data || [];
       });
     },
@@ -167,7 +196,9 @@ export function createDb({
 
     /**
      * The order and its items for the paid-order email (email.js). Only the
-     * columns the email shows — never payment_card_pan. Reads, so retried.
+     * columns the email shows — never payment_card_pan. list_price and
+     * campaign_name exist only after the campaigns migration; without them
+     * the old columns are read. Reads, so retried.
      */
     async fetchOrderForEmail(orderId) {
       return retry(async (signal) => {
@@ -178,11 +209,10 @@ export function createDb({
           .single()
           .abortSignal(signal);
         check(error, 'fetch order for email');
-        const { data: items, error: itemsErr } = await sb
-          .from('order_items')
-          .select('product_id, name_fa, qty, unit_price')
-          .eq('order_id', orderId)
-          .abortSignal(signal);
+        const itemsQuery = (cols) => sb.from('order_items').select(cols).eq('order_id', orderId).abortSignal(signal);
+        let { data: items, error: itemsErr } = await itemsQuery('product_id, name_fa, qty, unit_price, list_price, campaign_name');
+        // Before supabase/migration-discount-campaigns.sql: the two columns don't exist yet.
+        if (itemsErr && isMissingColumn(itemsErr)) ({ data: items, error: itemsErr } = await itemsQuery('product_id, name_fa, qty, unit_price'));
         check(itemsErr, 'fetch order items for email');
         return { order, items: items || [] };
       });

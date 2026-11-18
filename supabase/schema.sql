@@ -88,7 +88,25 @@ create table if not exists order_items (
   product_id uuid references products (id),
   name_fa text not null,        -- snapshot of the name at time of purchase
   qty integer not null default 1,
-  unit_price bigint not null default 0
+  unit_price bigint not null default 0,  -- the price charged (after a campaign)
+  list_price bigint,                     -- before the campaign; null when none (migration-discount-campaigns.sql)
+  campaign_name text                     -- the campaign's name on that line; null when none
+);
+
+-- Discount campaigns («تخفیف‌ها» in the admin) — migration-discount-campaigns.sql
+create table if not exists discount_campaigns (
+  id uuid primary key default gen_random_uuid(),
+  name text not null constraint discount_campaigns_name_check check (char_length(btrim(name)) between 1 and 60),
+  percent integer not null constraint discount_campaigns_percent_check check (percent between 1 and 90),
+  scope text not null default 'all' constraint discount_campaigns_scope_check check (scope in ('all', 'collections', 'products')),
+  collections text[] not null default '{}',
+  product_slugs text[] not null default '{}',
+  starts_at timestamptz,
+  ends_at timestamptz,
+  enabled boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint discount_campaigns_dates_check check (starts_at is null or ends_at is null or ends_at > starts_at)
 );
 
 -- ---------------------------------------------------------------------------
@@ -119,6 +137,21 @@ create policy "products: admin write" on products for insert
 create policy "products: admin update" on products for update
   using (exists (select 1 from profiles where id = auth.uid() and is_admin));
 create policy "products: admin delete" on products for delete
+  using (exists (select 1 from profiles where id = auth.uid() and is_admin));
+
+-- Discount campaigns: anyone may read only the active ones (the storefront);
+-- admins read and write all. The payment server reads with the service role.
+alter table discount_campaigns enable row level security;
+create policy "discount_campaigns: public read active" on discount_campaigns for select
+  using (enabled and percent between 1 and 90 and (starts_at is null or starts_at <= now()) and (ends_at is null or ends_at > now()));
+create policy "discount_campaigns: admin read" on discount_campaigns for select
+  using (exists (select 1 from profiles where id = auth.uid() and is_admin));
+create policy "discount_campaigns: admin insert" on discount_campaigns for insert
+  with check (exists (select 1 from profiles where id = auth.uid() and is_admin));
+create policy "discount_campaigns: admin update" on discount_campaigns for update
+  using (exists (select 1 from profiles where id = auth.uid() and is_admin))
+  with check (exists (select 1 from profiles where id = auth.uid() and is_admin));
+create policy "discount_campaigns: admin delete" on discount_campaigns for delete
   using (exists (select 1 from profiles where id = auth.uid() and is_admin));
 
 -- Orders: a signed-in user can see their own orders; admins can see all.

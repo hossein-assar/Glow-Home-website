@@ -19,6 +19,7 @@ export function log(level, event, fields = {}) {
 }
 
 const GENERIC_ERROR = 'خطایی رخ داد. لطفاً دوباره تلاش کنید.';
+export const PRICE_CHANGED_ERROR = 'مبلغ سفارش تغییر کرده است (مثلاً یک تخفیف تمام یا شروع شده است). مبلغ جدید را بررسی کنید و دوباره «پرداخت آنلاین» را بزنید.';
 const GATEWAY_ERROR = 'اتصال به درگاه پرداخت برقرار نشد. لطفاً چند دقیقه بعد دوباره تلاش کنید.';
 
 // Production authorities are 36 chars ("A" + digits); sandbox ones start
@@ -199,14 +200,24 @@ export function createApp({ config, db, zarinpal, notifyPaid = () => {}, logger 
 
         const slugs = [...new Set(input.items.map((it) => parseCartKey(it.cartKey).id))];
         const products = await guard.run('fetch_products', () => db.fetchProductsBySlugs(slugs));
+        const campaigns = await guard.run('fetch_campaigns', () => db.fetchActiveCampaigns());
         guard.at('price');
         const priced = priceCart({
           items: input.items,
           products,
+          campaigns,
+          now: Date.now(),
           discountCode: input.discountCode,
           city: input.city,
         });
         if (priced.error) return reply(400, { ok: false, error: priced.error });
+        // The customer was shown another total (a campaign started or ended,
+        // a price changed): no order, no payment — the page shows the new
+        // total and they confirm again. Never charged at the shown amount.
+        if (input.expectedTotal != null && input.expectedTotal !== priced.total) {
+          logger('info', 'checkout.price_changed', { shown: input.expectedTotal, total: priced.total });
+          return reply(409, { ok: false, code: 'price_changed', total: priced.total, error: PRICE_CHANGED_ERROR });
+        }
 
         const amount = tomanToGatewayAmount(priced.total);
         if (!Number.isSafeInteger(amount) || amount <= 0 || amount > MAX_GATEWAY_AMOUNT) {

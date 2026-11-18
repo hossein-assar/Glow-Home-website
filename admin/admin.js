@@ -102,6 +102,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'orders') loadOrders();
+    if (btn.dataset.tab === 'discounts') loadCampaigns();
   });
 });
 
@@ -1625,7 +1626,7 @@ function orderCardHtml(o, items) {
         ${items
           .map(
             (it) =>
-              `<div class="order-item-row"><span>${escapeHtml(it.name_fa)} × ${it.qty}</span><span>${money(it.unit_price * it.qty)}</span></div>`
+              `<div class="order-item-row"><span>${escapeHtml(it.name_fa)} × ${it.qty}${lineDiscountNote(it, '<span class="order-item-was">', '</span>')}</span><span>${money(it.unit_price * it.qty)}</span></div>`
           )
           .join('')}
         <div class="order-item-row" style="font-weight:700; margin-top:6px; padding-top:6px; border-top:1px solid var(--divider)">
@@ -1689,12 +1690,30 @@ function faNum(n) {
   return Number(n || 0).toLocaleString('fa-IR');
 }
 
+/** The price an order line had before its campaign (order_items.list_price,
+ * from supabase/migration-discount-campaigns.sql); unit_price when there was
+ * none — old orders, fees, lines sold at the list price. Same as email.js. */
+function lineListPrice(it) {
+  const list = Number(it.list_price);
+  return Number.isSafeInteger(list) && list > it.unit_price ? list : it.unit_price;
+}
+
+/** «قیمت اصلی … — تخفیف «name»» for a discounted line, wrapped in open/close. */
+function lineDiscountNote(it, open, close) {
+  const list = lineListPrice(it);
+  if (!(list > it.unit_price)) return '';
+  return `${open}قیمت اصلی ${money(list)} — تخفیف${it.campaign_name ? ` «${escapeHtml(it.campaign_name)}»` : ''}${close}`;
+}
+
 // `origin` (location.origin) makes the font URLs absolute: the print window
 // starts as about:blank, where a root-relative URL may not resolve.
 function orderPrintHtml(o, items, origin = '') {
   const products = items.filter((it) => it.product_id != null);
   const fees = items.filter((it) => it.product_id == null);
   const itemsSum = products.reduce((sum, it) => sum + it.unit_price * it.qty, 0);
+  const listSum = products.reduce((sum, it) => sum + lineListPrice(it) * it.qty, 0);
+  const campaignDiscount = listSum - itemsSum;
+  const campaigns = [...new Set(products.filter((it) => lineListPrice(it) > it.unit_price && it.campaign_name).map((it) => it.campaign_name))];
   const feesSum = fees.reduce((sum, it) => sum + it.unit_price * it.qty, 0);
   const discount = Math.max(0, itemsSum + feesSum - (o.total || 0));
   const pay = orderPaymentState(o);
@@ -1747,6 +1766,7 @@ function orderPrintHtml(o, items, origin = '') {
   th { font-weight: 700; }
   td.n, th.n { text-align: center; width: 10mm; }
   td.num, th.num { text-align: left; white-space: nowrap; }
+  td .was { font-size: 9pt; color: #555; margin-top: 1mm; }
   tr { page-break-inside: avoid; break-inside: avoid; }
   thead { display: table-header-group; }
   .totals { margin-top: 2mm; margin-inline-start: auto; width: 82mm; font-size: 11pt; }
@@ -1817,13 +1837,18 @@ function orderPrintHtml(o, items, origin = '') {
       ${products
         .map(
           (it, i) =>
-            `<tr><td class="n">${faNum(i + 1)}</td><td>${escapeHtml(it.name_fa)}</td><td class="n">${faNum(it.qty)}</td><td class="num">${money(it.unit_price)}</td><td class="num">${money(it.unit_price * it.qty)}</td></tr>`
+            `<tr><td class="n">${faNum(i + 1)}</td><td>${escapeHtml(it.name_fa)}${lineDiscountNote(it, '<div class="was">', '</div>')}</td><td class="n">${faNum(it.qty)}</td><td class="num">${money(it.unit_price)}</td><td class="num">${money(it.unit_price * it.qty)}</td></tr>`
         )
         .join('')}
     </tbody>
   </table>
   <div class="totals">
-    <div><span>جمع اقلام</span><span>${money(itemsSum)}</span></div>
+    ${
+      campaignDiscount > 0
+        ? `<div><span>جمع اقلام با قیمت اصلی</span><span>${money(listSum)}</span></div>
+    <div><span>تخفیف مناسبت${campaigns.length ? ` (${campaigns.map(escapeHtml).join('، ')})` : ''}</span><span>−${money(campaignDiscount)}</span></div>`
+        : `<div><span>جمع اقلام</span><span>${money(itemsSum)}</span></div>`
+    }
     ${fees.map((f) => `<div><span>${escapeHtml(f.name_fa)}</span><span>${money(f.unit_price * f.qty)}</span></div>`).join('')}
     ${discount > 0 ? `<div><span>تخفیف${o.discount_code ? ` (${ltr(o.discount_code)})` : ''}</span><span>−${money(discount)}</span></div>` : ''}
     <div class="grand"><span>${pay.paid ? 'مبلغ پرداخت‌شده' : 'مبلغ سفارش (پرداخت‌نشده)'}</span><span>${money(o.total)}</span></div>
@@ -1902,6 +1927,491 @@ function escapeHtml(s) {
 function escapeAttr(s) {
   return escapeHtml(s);
 }
+
+/* ---- Discounts («تخفیف‌ها») -------------------------------------------------
+   Campaigns for occasions (یلدا, نوروز…): a whole percent off all products,
+   some collections, or chosen products, optionally between two Jalali dates,
+   with an on/off switch. Stored in discount_campaigns
+   (supabase/migration-discount-campaigns.sql). The storefront shows them;
+   the payment server reads them itself and decides the price charged — this
+   tab only edits the rows. The preview uses the same rule as both. */
+
+// ---- Campaign discounts (shared rule) -------------------------------------------
+// ⚠ This block is identical in app.js, admin/admin.js, api/orders.js and
+// payment-server/src/pricing.js (`npm test` in payment-server/ checks it).
+// A campaign (table discount_campaigns, edited in the admin «تخفیف‌ها» tab)
+// takes a whole percent (1–90) off every size and every shade of the
+// products it covers: all of them, some collections, or chosen products
+// (by slug). Each unit price is discounted on its own and rounded to the
+// nearest 1,000 Toman; fees are never discounted. Two campaigns on one
+// product never stack: the larger percent wins (on a tie, the first one).
+// Active = switched on and starts_at ≤ now < ends_at (an empty date is no
+// limit); the payment server decides with its own clock.
+const DISCOUNT_MAX_PERCENT = 90;
+const DISCOUNT_ROUND_TOMAN = 1000;
+const DISCOUNT_SCOPES = ['all', 'collections', 'products'];
+
+/** True when campaign c is valid and running at `now` (ms). now == null
+ * skips the dates (the storefront: its database read returns only running
+ * campaigns, and the visitor's clock may be wrong). */
+function campaignIsActive(c, now) {
+  if (!c || c.enabled !== true || !DISCOUNT_SCOPES.includes(c.scope)) return false;
+  const percent = Number(c.percent);
+  if (!Number.isInteger(percent) || percent < 1 || percent > DISCOUNT_MAX_PERCENT) return false;
+  if (now == null) return true;
+  const start = c.starts_at ? Date.parse(c.starts_at) : null;
+  const end = c.ends_at ? Date.parse(c.ends_at) : null;
+  if (Number.isNaN(start) || Number.isNaN(end)) return false;
+  return (start == null || start <= now) && (end == null || now < end);
+}
+
+/** True when campaign c covers product p ({ slug, collection }). */
+function campaignCovers(c, p) {
+  if (c.scope === 'all') return true;
+  if (c.scope === 'collections') return Array.isArray(c.collections) && c.collections.includes(p.collection);
+  if (c.scope === 'products') return Array.isArray(c.product_slugs) && c.product_slugs.includes(p.slug);
+  return false;
+}
+
+/** The covering campaign with the largest percent, or null. `campaigns`
+ * must already be the active ones. */
+function bestCampaignFor(p, campaigns) {
+  let best = null;
+  for (const c of Array.isArray(campaigns) ? campaigns : []) {
+    if (campaignCovers(c, p) && (!best || Number(c.percent) > Number(best.percent))) best = c;
+  }
+  return best;
+}
+
+/** price less percent, rounded to the nearest DISCOUNT_ROUND_TOMAN, never
+ * below DISCOUNT_ROUND_TOMAN nor above price. An unpriced (0, missing,
+ * not a whole number) price is returned as it is. */
+function discountedPrice(price, percent) {
+  if (!Number.isSafeInteger(price) || price <= 0) return price;
+  const pct = Math.min(DISCOUNT_MAX_PERCENT, Math.max(0, Math.floor(Number(percent) || 0)));
+  const rounded = Math.round((price * (100 - pct)) / 100 / DISCOUNT_ROUND_TOMAN) * DISCOUNT_ROUND_TOMAN;
+  return Math.min(price, Math.max(DISCOUNT_ROUND_TOMAN, rounded));
+}
+
+/** One unit at listPrice under campaign c (or none): { price, listPrice,
+ * campaign } — campaign is null when nothing comes off. */
+function applyCampaign(listPrice, c) {
+  const price = c ? discountedPrice(listPrice, c.percent) : listPrice;
+  if (!c || !(price < listPrice)) return { price: listPrice, listPrice, campaign: null };
+  return { price, listPrice, campaign: c };
+}
+// ---- end of campaign discounts ---------------------------------------------------
+
+// Iran has had no daylight saving time since 2022: Tehran is UTC+03:30
+// all year. A campaign starts at 00:00 Tehran time on its first day and
+// ends at 24:00 on its last day (stored as 00:00 of the next day, exclusive).
+const TEHRAN_UTC_OFFSET_MIN = 210;
+const JALALI_MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+const CAMPAIGN_NAME_MAX = 60;
+const MISSING_CAMPAIGNS_TABLE =
+  'جدول تخفیف‌ها هنوز ساخته نشده است. اول فایل supabase/migration-discount-campaigns.sql را در Supabase اجرا کنید.';
+
+/** [jy, jm, jd] for a Gregorian date (checked day by day against the
+ * Persian calendar for 1395–1435 in test/discount-campaigns.test.js). */
+function gregorianToJalali(gy, gm, gd) {
+  const gdm = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+  const gy2 = gm > 2 ? gy + 1 : gy;
+  let days = 355666 + 365 * gy + Math.floor((gy2 + 3) / 4) - Math.floor((gy2 + 99) / 100) + Math.floor((gy2 + 399) / 400) + gd + gdm[gm - 1];
+  let jy = -1595 + 33 * Math.floor(days / 12053);
+  days %= 12053;
+  jy += 4 * Math.floor(days / 1461);
+  days %= 1461;
+  if (days > 365) {
+    jy += Math.floor((days - 1) / 365);
+    days = (days - 1) % 365;
+  }
+  const jm = days < 186 ? 1 + Math.floor(days / 31) : 7 + Math.floor((days - 186) / 30);
+  const jd = 1 + (days < 186 ? days % 31 : (days - 186) % 30);
+  return [jy, jm, jd];
+}
+
+/** [gy, gm, gd] for a Jalali date. */
+function jalaliToGregorian(jy, jm, jd) {
+  jy += 1595;
+  let days = -355668 + 365 * jy + Math.floor(jy / 33) * 8 + Math.floor(((jy % 33) + 3) / 4) + jd + (jm < 7 ? (jm - 1) * 31 : (jm - 7) * 30 + 186);
+  let gy = 400 * Math.floor(days / 146097);
+  days %= 146097;
+  if (days > 36524) {
+    gy += 100 * Math.floor(--days / 36524);
+    days %= 36524;
+    if (days >= 365) days++;
+  }
+  gy += 4 * Math.floor(days / 1461);
+  days %= 1461;
+  if (days > 365) {
+    gy += Math.floor((days - 1) / 365);
+    days = (days - 1) % 365;
+  }
+  let gd = days + 1;
+  const ml = [0, 31, (gy % 4 === 0 && gy % 100 !== 0) || gy % 400 === 0 ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  let gm = 1;
+  for (; gm <= 12 && gd > ml[gm]; gm++) gd -= ml[gm];
+  return [gy, gm, gd];
+}
+
+/** The instant 00:00 Tehran time on Jalali day jy/jm/jd, plus `addDays`
+ * days, as an ISO string; null when that day doesn't exist (30 اسفند of a
+ * common year, 31 مهر…). */
+function tehranDayStartIso(jy, jm, jd, addDays = 0) {
+  const [gy, gm, gd] = jalaliToGregorian(jy, jm, jd);
+  const back = gregorianToJalali(gy, gm, gd);
+  if (back[0] !== jy || back[1] !== jm || back[2] !== jd) return null;
+  return new Date(Date.UTC(gy, gm - 1, gd + addDays) - TEHRAN_UTC_OFFSET_MIN * 60000).toISOString();
+}
+
+/** Jalali [jy, jm, jd] of an instant, in Tehran time. */
+function tehranJalaliOf(ms) {
+  const d = new Date(ms + TEHRAN_UTC_OFFSET_MIN * 60000);
+  return gregorianToJalali(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+}
+
+/** The form's start (or end) day from its three dropdowns: null when all
+ * are empty, { error } when only some are, or [jy, jm, jd]. */
+function jalaliFieldValue(d, label) {
+  const parts = [d && d.y, d && d.m, d && d.d].map((v) => String(v ?? '').trim());
+  if (parts.every((v) => !v)) return null;
+  if (parts.some((v) => !v)) return { error: `${label} را کامل انتخاب کنید (سال، ماه و روز).` };
+  const [jy, jm, jd] = parts.map(Number);
+  if (!Number.isInteger(jy) || !Number.isInteger(jm) || !Number.isInteger(jd) || !tehranDayStartIso(jy, jm, jd)) {
+    return { error: `${label} معتبر نیست (این روز در تقویم وجود ندارد).` };
+  }
+  return [jy, jm, jd];
+}
+
+/**
+ * The form → a discount_campaigns row, or { error } in Persian.
+ * f: { name, percent, scope, collections[], productSlugs[], start: {y,m,d},
+ * end: {y,m,d}, enabled }.
+ */
+function campaignFormToSave(f) {
+  const name = String(f.name ?? '').trim().replace(/\s+/g, ' ');
+  if (!name) return { error: 'نام مناسبت را وارد کنید (مثلاً «یلدا»).' };
+  if (name.length > CAMPAIGN_NAME_MAX) return { error: `نام مناسبت حداکثر ${faNum(CAMPAIGN_NAME_MAX)} حرف باشد.` };
+  const pct = toLatinDigits(String(f.percent ?? '')).trim();
+  if (!/^[0-9]{1,3}$/.test(pct) || Number(pct) < 1 || Number(pct) > DISCOUNT_MAX_PERCENT) {
+    return { error: `درصد تخفیف باید عددی صحیح از ۱ تا ${faNum(DISCOUNT_MAX_PERCENT)} باشد.` };
+  }
+  if (!DISCOUNT_SCOPES.includes(f.scope)) return { error: 'مشخص کنید تخفیف روی چه محصولاتی اعمال شود.' };
+  const collections = [...new Set((f.collections || []).filter((k) => Object.hasOwn(COLLECTION_LABEL, k)))];
+  const slugs = [...new Set((f.productSlugs || []).map((s) => String(s).trim()).filter(Boolean))];
+  if (f.scope === 'collections' && !collections.length) return { error: 'دست‌کم یک دسته را انتخاب کنید.' };
+  if (f.scope === 'products' && !slugs.length) return { error: 'دست‌کم یک محصول را انتخاب کنید.' };
+  const start = jalaliFieldValue(f.start, 'تاریخ شروع');
+  if (start && start.error) return start;
+  const end = jalaliFieldValue(f.end, 'تاریخ پایان');
+  if (end && end.error) return end;
+  const starts_at = start ? tehranDayStartIso(...start) : null;
+  const ends_at = end ? tehranDayStartIso(...end, 1) : null; // the whole last day
+  if (starts_at && ends_at && Date.parse(ends_at) <= Date.parse(starts_at)) {
+    return { error: 'تاریخ پایان نباید پیش از تاریخ شروع باشد.' };
+  }
+  return {
+    row: {
+      name,
+      percent: Number(pct),
+      scope: f.scope,
+      collections: f.scope === 'collections' ? collections : [],
+      product_slugs: f.scope === 'products' ? slugs : [],
+      starts_at,
+      ends_at,
+      enabled: f.enabled === true,
+    },
+  };
+}
+
+/** Where a campaign stands at `now`, for the list (the payment server decides
+ * with its own clock): خاموش / زمان‌بندی‌شده / فعال / پایان‌یافته. */
+function campaignStatus(c, now) {
+  if (!c.enabled) return { key: 'off', label: 'خاموش' };
+  if (c.ends_at && Date.parse(c.ends_at) <= now) return { key: 'ended', label: 'پایان‌یافته' };
+  if (c.starts_at && Date.parse(c.starts_at) > now) return { key: 'scheduled', label: 'زمان‌بندی‌شده' };
+  return { key: 'active', label: 'فعال' };
+}
+
+/** «۳۰ آذر ۱۴۰۵» for a stored start (or, with endExclusive, the last day of
+ * a stored end); '—' when empty. */
+function campaignDateFa(iso, endExclusive = false) {
+  if (!iso) return '—';
+  const [jy, jm, jd] = tehranJalaliOf(Date.parse(iso) - (endExclusive ? 1 : 0));
+  return `${faNum(jd)} ${JALALI_MONTHS[jm - 1]} ${String(jy).replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d])}`;
+}
+
+function campaignScopeFa(c) {
+  if (c.scope === 'all') return 'همه محصولات';
+  if (c.scope === 'collections') return (c.collections || []).map((k) => COLLECTION_LABEL[k] || k).join('، ') || '—';
+  return `${faNum((c.product_slugs || []).length)} محصول انتخابی`;
+}
+
+/**
+ * The preview table's rows: every product the campaign covers, its price
+ * now (the base size) and after the discount, and a note — no price, a
+ * bigger campaign that wins, sizes/shades, provisional price, out of stock.
+ * `others`: the other saved campaigns (switched on and not ended).
+ */
+function campaignPreviewRows(row, products, others = [], now = Date.now()) {
+  const rivals = others.filter((o) => o.id !== row.id && o.enabled && !(o.ends_at && Date.parse(o.ends_at) <= now));
+  return products
+    .filter((p) => campaignCovers(row, { slug: p.slug, collection: p.collection }))
+    .map((p) => {
+      const price = Number(p.price);
+      const priced = Number.isSafeInteger(price) && price > 0;
+      const notes = [];
+      if (!priced) notes.push('بدون قیمت — تخفیفی اعمال نمی‌شود');
+      const bigger = bestCampaignFor({ slug: p.slug, collection: p.collection }, rivals);
+      if (bigger && Number(bigger.percent) > row.percent) {
+        notes.push(`«${bigger.name}» با ٪${faNum(bigger.percent)} بیشتر است و هم‌زمان به جای این تخفیف اعمال می‌شود`);
+      }
+      if (priced && Array.isArray(p.variants) && p.variants.length) notes.push(`همه‌ی اندازه‌ها و شیدها هم ٪${faNum(row.percent)}`);
+      if (p.price_provisional) notes.push('قیمت موقت');
+      if (p.in_stock === false) notes.push('ناموجود');
+      return { name_fa: p.name_fa, price: priced ? price : 0, sale: priced ? discountedPrice(price, row.percent) : 0, notes };
+    });
+}
+
+function campaignPreviewHtml(rows) {
+  if (!rows.length) return '<p class="msg error">هیچ محصولی در این تخفیف نیست.</p>';
+  return `
+    <div class="dc-preview-head">${faNum(rows.length)} محصول — قیمت‌ها گرد به نزدیک‌ترین ۱٬۰۰۰ تومان</div>
+    <div class="dc-scroll"><table class="dc-preview">
+      <thead><tr><th>محصول</th><th>قیمت فعلی</th><th>قیمت با تخفیف</th><th>توضیح</th></tr></thead>
+      <tbody>${rows
+        .map(
+          (r) => `<tr><td data-label="محصول">${escapeHtml(r.name_fa)}</td><td class="num" data-label="قیمت فعلی">${r.price ? money(r.price) : '—'}</td><td class="num" data-label="قیمت با تخفیف"><b>${
+            r.sale ? money(r.sale) : '—'
+          }</b></td><td class="dc-note">${r.notes.map(escapeHtml).join('<br>')}</td></tr>`
+        )
+        .join('')}</tbody>
+    </table></div>`;
+}
+
+function campaignListHtml(campaigns, now = Date.now()) {
+  if (!campaigns.length) return '<p>هنوز تخفیفی ساخته نشده است.</p>';
+  return `<div class="dc-scroll"><table class="dc-list">
+    <thead><tr><th>نام مناسبت</th><th>درصد</th><th>اعمال روی</th><th>از</th><th>تا</th><th>وضعیت</th><th></th></tr></thead>
+    <tbody>${campaigns
+      .map((c) => {
+        const st = campaignStatus(c, now);
+        return `<tr data-id="${escapeAttr(c.id)}">
+        <td class="dc-name"><b>${escapeHtml(c.name)}</b></td>
+        <td data-label="درصد">٪${faNum(c.percent)}</td>
+        <td data-label="اعمال روی">${escapeHtml(campaignScopeFa(c))}</td>
+        <td data-label="از">${campaignDateFa(c.starts_at)}</td>
+        <td data-label="تا">${campaignDateFa(c.ends_at, true)}</td>
+        <td data-label="وضعیت"><span class="status-pill dc-${st.key}">${st.label}</span></td>
+        <td class="dc-actions">
+          <button type="button" class="btn ghost" data-dc="edit">ویرایش</button>
+          <button type="button" class="btn ghost" data-dc="toggle">${c.enabled ? 'توقف' : 'روشن کردن'}</button>
+          <button type="button" class="btn danger" data-dc="delete">حذف</button>
+        </td>
+      </tr>`;
+      })
+      .join('')}</tbody>
+  </table></div>`;
+}
+
+/** Year / month / day dropdowns for one date; `years` to offer. */
+function jalaliPickerHtml(prefix, value, years) {
+  const [vy, vm, vd] = value || [];
+  const opt = (v, label, sel) => `<option value="${v}"${sel ? ' selected' : ''}>${label}</option>`;
+  const ys = [...new Set([...years, ...(vy ? [vy] : [])])].sort();
+  return `<span class="dc-date">
+      <select id="${prefix}-d" aria-label="روز">${opt('', 'روز', !vd)}${Array.from({ length: 31 }, (_, i) => opt(i + 1, faNum(i + 1), vd === i + 1)).join('')}</select>
+      <select id="${prefix}-m" aria-label="ماه">${opt('', 'ماه', !vm)}${JALALI_MONTHS.map((m, i) => opt(i + 1, m, vm === i + 1)).join('')}</select>
+      <select id="${prefix}-y" aria-label="سال">${opt('', 'سال', !vy)}${ys.map((y) => opt(y, String(y).replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d]), vy === y)).join('')}</select>
+    </span>`;
+}
+
+/** The form, empty or filled from campaign c. */
+function campaignFormHtml(c, products, now = Date.now()) {
+  const thisYear = tehranJalaliOf(now)[0];
+  const years = [thisYear, thisYear + 1, thisYear + 2];
+  const start = c && c.starts_at ? tehranJalaliOf(Date.parse(c.starts_at)) : null;
+  const end = c && c.ends_at ? tehranJalaliOf(Date.parse(c.ends_at) - 1) : null;
+  const scope = (c && c.scope) || 'all';
+  const cols = new Set((c && c.collections) || []);
+  const slugs = new Set((c && c.product_slugs) || []);
+  const sorted = [...products].sort((a, b) => String(a.name_fa).localeCompare(String(b.name_fa), 'fa'));
+  return `
+    <h2 style="margin-top:0; font-size:16px">${c ? `ویرایش «${escapeHtml(c.name)}»` : 'تخفیف تازه'}</h2>
+    <div class="row">
+      <div style="flex:2"><label for="dc-name">نام مناسبت (به مشتری نشان داده می‌شود)</label><input id="dc-name" maxlength="${CAMPAIGN_NAME_MAX}" value="${escapeAttr((c && c.name) || '')}" placeholder="مثلاً: یلدا"></div>
+      <div><label for="dc-percent">درصد تخفیف (۱ تا ${faNum(DISCOUNT_MAX_PERCENT)})</label><input id="dc-percent" inputmode="numeric" dir="ltr" value="${c ? escapeAttr(c.percent) : ''}" placeholder="20"></div>
+    </div>
+    <fieldset class="dc-scope">
+      <legend>اعمال روی</legend>
+      <label><input type="radio" name="dc-scope" value="all" ${scope === 'all' ? 'checked' : ''}> همه محصولات</label>
+      <label><input type="radio" name="dc-scope" value="collections" ${scope === 'collections' ? 'checked' : ''}> یک یا چند دسته</label>
+      <label><input type="radio" name="dc-scope" value="products" ${scope === 'products' ? 'checked' : ''}> محصولات انتخابی</label>
+    </fieldset>
+    <div class="dc-cols" id="dc-cols" ${scope === 'collections' ? '' : 'hidden'}>
+      ${Object.entries(COLLECTION_LABEL)
+        .map(([k, label]) => `<label><input type="checkbox" class="dc-col" value="${k}" ${cols.has(k) ? 'checked' : ''}> ${escapeHtml(label)}</label>`)
+        .join('')}
+    </div>
+    <div class="dc-products" id="dc-products" ${scope === 'products' ? '' : 'hidden'}>
+      <input type="search" id="dc-product-search" placeholder="جستجوی محصول...">
+      <div class="dc-checklist" id="dc-checklist">
+        ${sorted
+          .map(
+            (p) =>
+              `<label data-q="${escapeAttr((p.name_fa + ' ' + (p.name_en || '') + ' ' + p.slug).toLowerCase())}"><input type="checkbox" class="dc-prod" value="${escapeAttr(p.slug)}" ${
+                slugs.has(p.slug) ? 'checked' : ''
+              }> ${escapeHtml(p.name_fa)} <span class="dc-slug">${escapeHtml(p.slug)}</span></label>`
+          )
+          .join('')}
+      </div>
+    </div>
+    <div class="row dc-dates">
+      <div><label>تاریخ شروع (اختیاری — از ابتدای روز، به وقت ایران)</label>${jalaliPickerHtml('dc-start', start, years)}</div>
+      <div><label>تاریخ پایان (اختیاری — تا پایان روز)</label>${jalaliPickerHtml('dc-end', end, years)}</div>
+    </div>
+    <label class="dc-switch"><input type="checkbox" id="dc-enabled" ${!c || c.enabled ? 'checked' : ''}> روشن (در بازه‌ی تاریخ، روی فروشگاه اعمال شود)</label>
+    <div class="dc-buttons">
+      <button type="button" class="btn ghost" id="dc-preview-btn">پیش‌نمایش قیمت‌ها</button>
+      <button type="button" class="btn" id="dc-save">${c ? 'ذخیره تغییرات' : 'ذخیره تخفیف'}</button>
+      ${c ? '<button type="button" class="btn ghost" id="dc-cancel">انصراف</button>' : ''}
+    </div>
+    <div class="msg" id="dc-msg"></div>
+    <div id="dc-preview-box"></div>`;
+}
+
+let CAMPAIGNS_CACHE = [];
+let campaignEditingId = null;
+
+function readCampaignForm() {
+  const val = (id) => (document.getElementById(id) || {}).value || '';
+  const scopeEl = document.querySelector('input[name="dc-scope"]:checked');
+  return {
+    name: val('dc-name'),
+    percent: val('dc-percent'),
+    scope: scopeEl ? scopeEl.value : '',
+    collections: [...document.querySelectorAll('.dc-col:checked')].map((el) => el.value),
+    productSlugs: [...document.querySelectorAll('.dc-prod:checked')].map((el) => el.value),
+    start: { y: val('dc-start-y'), m: val('dc-start-m'), d: val('dc-start-d') },
+    end: { y: val('dc-end-y'), m: val('dc-end-m'), d: val('dc-end-d') },
+    enabled: !!(document.getElementById('dc-enabled') || {}).checked,
+  };
+}
+
+function setCampaignMsg(text, cls = '') {
+  const msg = document.getElementById('dc-msg');
+  msg.textContent = text;
+  msg.className = 'msg' + (cls ? ' ' + cls : '');
+}
+
+function renderCampaignForm() {
+  const c = CAMPAIGNS_CACHE.find((x) => x.id === campaignEditingId) || null;
+  const box = document.getElementById('discount-form');
+  box.innerHTML = campaignFormHtml(c, PRODUCTS_CACHE);
+  box.querySelectorAll('input[name="dc-scope"]').forEach((r) =>
+    r.addEventListener('change', () => {
+      document.getElementById('dc-cols').hidden = r.value !== 'collections';
+      document.getElementById('dc-products').hidden = r.value !== 'products';
+    })
+  );
+  document.getElementById('dc-product-search').addEventListener('input', (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('#dc-checklist label').forEach((l) => (l.hidden = !!q && !l.dataset.q.includes(q)));
+  });
+  document.getElementById('dc-preview-btn').addEventListener('click', () => previewCampaign());
+  document.getElementById('dc-save').addEventListener('click', () => saveCampaign());
+  const cancel = document.getElementById('dc-cancel');
+  if (cancel)
+    cancel.addEventListener('click', () => {
+      campaignEditingId = null;
+      renderCampaignForm();
+    });
+}
+
+/** Validates the form and shows the preview table; returns the row or null. */
+function previewCampaign() {
+  const saved = campaignFormToSave(readCampaignForm());
+  const box = document.getElementById('dc-preview-box');
+  if (saved.error) {
+    setCampaignMsg(saved.error, 'error');
+    box.innerHTML = '';
+    return null;
+  }
+  setCampaignMsg('');
+  const row = { ...saved.row, id: campaignEditingId };
+  box.innerHTML = campaignPreviewHtml(campaignPreviewRows(row, PRODUCTS_CACHE, CAMPAIGNS_CACHE));
+  return saved.row;
+}
+
+async function saveCampaign() {
+  const row = previewCampaign();
+  if (!row) return;
+  setCampaignMsg('در حال ذخیره...');
+  const now = new Date().toISOString();
+  const { error } = campaignEditingId
+    ? await sb.from('discount_campaigns').update({ ...row, updated_at: now }).eq('id', campaignEditingId)
+    : await sb.from('discount_campaigns').insert(row);
+  if (error) return setCampaignMsg('خطا: ' + campaignErrorText(error), 'error');
+  campaignEditingId = null;
+  await loadCampaigns();
+  setCampaignMsg('ذخیره شد. پیش‌نمایش بالا همان قیمت‌هایی است که فروشگاه نشان می‌دهد.', 'ok');
+}
+
+function campaignErrorText(error) {
+  const m = String((error && (error.message || error.code)) || '');
+  if (/discount_campaigns/.test(m) && /does not exist|could not find/i.test(m)) return MISSING_CAMPAIGNS_TABLE;
+  return adminErrorText(error);
+}
+
+async function loadCampaigns() {
+  const list = document.getElementById('discount-list');
+  list.innerHTML = 'در حال بارگذاری...';
+  if (!PRODUCTS_CACHE.length) {
+    const { data } = await sb.from('products').select('*').order('sort_order', { ascending: true });
+    PRODUCTS_CACHE = data || [];
+  }
+  const { data, error } = await sb.from('discount_campaigns').select('*').order('created_at', { ascending: false });
+  if (error) {
+    if (isNetworkError(error)) return showRetry(list, loadCampaigns);
+    list.innerHTML = `<p class="msg error">${escapeHtml(campaignErrorText(error))}</p>`;
+    return;
+  }
+  CAMPAIGNS_CACHE = data || [];
+  list.innerHTML = campaignListHtml(CAMPAIGNS_CACHE);
+  renderCampaignForm();
+}
+
+document.getElementById('discount-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-dc]');
+  if (!btn) return;
+  const id = btn.closest('tr').dataset.id;
+  const c = CAMPAIGNS_CACHE.find((x) => String(x.id) === id);
+  if (!c) return;
+  if (btn.dataset.dc === 'edit') {
+    campaignEditingId = c.id;
+    renderCampaignForm();
+    document.getElementById('discount-form').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    return;
+  }
+  btn.disabled = true;
+  let error = null;
+  if (btn.dataset.dc === 'toggle') {
+    ({ error } = await sb.from('discount_campaigns').update({ enabled: !c.enabled, updated_at: new Date().toISOString() }).eq('id', c.id));
+  } else if (btn.dataset.dc === 'delete') {
+    if (!confirm(`حذف تخفیف «${c.name}»؟ سفارش‌های قبلی تغییری نمی‌کنند.`)) {
+      btn.disabled = false;
+      return;
+    }
+    ({ error } = await sb.from('discount_campaigns').delete().eq('id', c.id));
+    if (!error && campaignEditingId === c.id) campaignEditingId = null;
+  }
+  if (error) {
+    btn.disabled = false;
+    alert('خطا: ' + campaignErrorText(error));
+    return;
+  }
+  loadCampaigns();
+});
 
 // Boot
 checkAdminAndRender();

@@ -179,6 +179,7 @@ for (const [city, rial, total, line] of [['کرج', 157000000, 15700000, FEE_LIN
       config: { publicSiteUrl: 'https://glow-home.ir', callbackUrl: 'https://pay.glow-home.ir/api/verify', zarinpal: { mode: 'sandbox' } },
       db: {
         fetchProductsBySlugs: async () => [gisoo],
+        fetchActiveCampaigns: async () => [],
         nextOrderCode: async () => 'GH-1020',
         createOrder: async (o, items) => (orders.push({ ...o, items }), { id: 'o1', code: o.code }),
         setAuthority: async () => {},

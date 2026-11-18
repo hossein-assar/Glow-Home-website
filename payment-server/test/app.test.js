@@ -14,6 +14,7 @@ const config = {
 };
 
 let orders, items, seq, zp, logs;
+let campaigns = []; // discount_campaigns rows the fake database returns
 
 function fakeDb() {
   return {
@@ -25,6 +26,9 @@ function fakeDb() {
           variants: [{ height: 140, price: 12980000, shades: { plain: 12980000, embroidered: 15450000 } }],
         },
       ].filter((p) => slugs.includes(p.slug));
+    },
+    async fetchActiveCampaigns() {
+      return campaigns;
     },
     async nextOrderCode() { return 'GH-' + seq++; },
     async createOrder(o, its) {

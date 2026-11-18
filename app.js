@@ -120,6 +120,72 @@ function cityFees(rawCity) {
 }
 // ---- end of city fees ----------------------------------------------------------
 
+// ---- Campaign discounts (shared rule) -------------------------------------------
+// ⚠ This block is identical in app.js, admin/admin.js, api/orders.js and
+// payment-server/src/pricing.js (`npm test` in payment-server/ checks it).
+// A campaign (table discount_campaigns, edited in the admin «تخفیف‌ها» tab)
+// takes a whole percent (1–90) off every size and every shade of the
+// products it covers: all of them, some collections, or chosen products
+// (by slug). Each unit price is discounted on its own and rounded to the
+// nearest 1,000 Toman; fees are never discounted. Two campaigns on one
+// product never stack: the larger percent wins (on a tie, the first one).
+// Active = switched on and starts_at ≤ now < ends_at (an empty date is no
+// limit); the payment server decides with its own clock.
+const DISCOUNT_MAX_PERCENT = 90;
+const DISCOUNT_ROUND_TOMAN = 1000;
+const DISCOUNT_SCOPES = ['all', 'collections', 'products'];
+
+/** True when campaign c is valid and running at `now` (ms). now == null
+ * skips the dates (the storefront: its database read returns only running
+ * campaigns, and the visitor's clock may be wrong). */
+function campaignIsActive(c, now) {
+  if (!c || c.enabled !== true || !DISCOUNT_SCOPES.includes(c.scope)) return false;
+  const percent = Number(c.percent);
+  if (!Number.isInteger(percent) || percent < 1 || percent > DISCOUNT_MAX_PERCENT) return false;
+  if (now == null) return true;
+  const start = c.starts_at ? Date.parse(c.starts_at) : null;
+  const end = c.ends_at ? Date.parse(c.ends_at) : null;
+  if (Number.isNaN(start) || Number.isNaN(end)) return false;
+  return (start == null || start <= now) && (end == null || now < end);
+}
+
+/** True when campaign c covers product p ({ slug, collection }). */
+function campaignCovers(c, p) {
+  if (c.scope === 'all') return true;
+  if (c.scope === 'collections') return Array.isArray(c.collections) && c.collections.includes(p.collection);
+  if (c.scope === 'products') return Array.isArray(c.product_slugs) && c.product_slugs.includes(p.slug);
+  return false;
+}
+
+/** The covering campaign with the largest percent, or null. `campaigns`
+ * must already be the active ones. */
+function bestCampaignFor(p, campaigns) {
+  let best = null;
+  for (const c of Array.isArray(campaigns) ? campaigns : []) {
+    if (campaignCovers(c, p) && (!best || Number(c.percent) > Number(best.percent))) best = c;
+  }
+  return best;
+}
+
+/** price less percent, rounded to the nearest DISCOUNT_ROUND_TOMAN, never
+ * below DISCOUNT_ROUND_TOMAN nor above price. An unpriced (0, missing,
+ * not a whole number) price is returned as it is. */
+function discountedPrice(price, percent) {
+  if (!Number.isSafeInteger(price) || price <= 0) return price;
+  const pct = Math.min(DISCOUNT_MAX_PERCENT, Math.max(0, Math.floor(Number(percent) || 0)));
+  const rounded = Math.round((price * (100 - pct)) / 100 / DISCOUNT_ROUND_TOMAN) * DISCOUNT_ROUND_TOMAN;
+  return Math.min(price, Math.max(DISCOUNT_ROUND_TOMAN, rounded));
+}
+
+/** One unit at listPrice under campaign c (or none): { price, listPrice,
+ * campaign } — campaign is null when nothing comes off. */
+function applyCampaign(listPrice, c) {
+  const price = c ? discountedPrice(listPrice, c.percent) : listPrice;
+  if (!c || !(price < listPrice)) return { price: listPrice, listPrice, campaign: null };
+  return { price, listPrice, campaign: c };
+}
+// ---- end of campaign discounts ---------------------------------------------------
+
 /** The /track order-code field only ever asks for the part after "GH-" —
  * this reconstructs the canonical GH-XXXX form the backend expects. Only
  * whitespace and a leading GH-/gh- prefix are stripped, NOT letters:
@@ -288,6 +354,10 @@ function icon(name, cls = 'icon') {
 
 let OUT = new Set(OUT_OF_STOCK);
 let ITEMS = [];
+// Running discount campaigns (discount_campaigns, read with the catalog —
+// the database returns only the active ones). The payment server reads its
+// own copy and decides the price charged; see the shared block above.
+let CAMPAIGNS = [];
 
 function buildItems() {
   OUT = new Set(OUT_OF_STOCK);
@@ -302,10 +372,16 @@ function buildItems() {
     const photos = (p.photos && p.photos.length ? p.photos : [p.photo_url || 'images/' + p.id + '.jpg']).map(
       proxiedPhotoUrl
     );
+    // The campaign giving this product the largest discount (or null). The
+    // base price and every size/shade price go through saleOf() with it.
+    const campaign = bestCampaignFor({ slug: p.id, collection: p.col }, CAMPAIGNS);
+    const sale = applyCampaign(price ?? 0, campaign);
     return {
       ...p,
-      price: price ?? 0,
-      priceFa: money(price ?? 0),
+      price: sale.price,
+      priceFa: money(sale.price),
+      listPrice: price ?? 0,
+      campaign,
       provisional: PROVISIONAL[p.id] ?? PRICES_ARE_PROVISIONAL,
       heightFa,
       materialFa,
@@ -324,6 +400,24 @@ function buildItems() {
 }
 
 const byId = (id) => ITEMS.find((p) => p.id === id);
+
+/** One unit of product p at listPrice (a size's or a shade's own price),
+ * after p's campaign: { price, listPrice, campaign }. */
+function saleOf(p, listPrice) {
+  return applyCampaign(Number(listPrice), (p && p.campaign) || null);
+}
+
+/** «٪۲۰ تخفیف» for a sale with a campaign, else ''. */
+function saleBadgeHtml(sale) {
+  return sale.campaign ? `<span class="sale-badge">٪${FA(sale.campaign.percent)} تخفیف</span>` : '';
+}
+
+/** A price: the new one in <b>, the old one struck through and the badge
+ * when a campaign takes something off; else just the price. */
+function salePriceHtml(sale) {
+  if (!sale.campaign) return `<b>${money(sale.price)}</b>`;
+  return `<s class="price-was" aria-label="قیمت قبل">${money(sale.listPrice)}</s><b>${money(sale.price)}</b>${saleBadgeHtml(sale)}`;
+}
 
 /* ---- State -------------------------------------------------------------- */
 
@@ -493,6 +587,7 @@ function cartLineData(key) {
   if (!p) return null;
 
   let line = { ...p, cartKey: key };
+  let listPrice = p.listPrice ?? p.price;
 
   if (hasShadeTypes(p)) {
     // Strict, same as the server: an old key without a valid shade/size
@@ -500,15 +595,22 @@ function cartLineData(key) {
     const o = shadeOption(p, height, shade);
     if (!o) return null;
     const heightFa = FA(o.variant.height) + ' سانتی‌متر';
-    line = { ...line, height: o.variant.height, heightFa, price: o.price, priceFa: money(o.price), shadeFa: o.type.name_fa };
+    listPrice = o.price;
+    line = { ...line, height: o.variant.height, heightFa, shadeFa: o.type.name_fa };
   } else if (height != null) {
     // Strict, same as both servers: a height that isn't one of the sizes (a
     // removed size, or any height on a product with no sizes) can't be priced.
     const v = (p.variants || []).find((x) => x.height === height);
     if (!v) return null;
     const heightFa = v.height === 0 ? 'ست' : FA(v.height) + ' سانتی‌متر';
-    line = { ...line, height: v.height, heightFa, price: v.price, priceFa: money(v.price) };
+    listPrice = v.price;
+    line = { ...line, height: v.height, heightFa };
   }
+  // This size/shade's own price, then the product's campaign on it.
+  line.sale = saleOf(p, listPrice);
+  line.listPrice = line.sale.listPrice;
+  line.price = line.sale.price;
+  line.priceFa = money(line.sale.price);
 
   if (colorIndex != null && p.colors && p.colors[colorIndex] != null) {
     line.color = p.colors[colorIndex];
@@ -595,14 +697,20 @@ function totals() {
       const p = cartLineData(key);
       if (!p) return null;
       const qty = state.cart[key];
-      return { ...p, qty, line: p.price * qty };
+      return { ...p, qty, line: p.price * qty, listLine: (p.listPrice ?? p.price) * qty };
     })
     .filter(Boolean);
 
-  const subtotal = rows.reduce((s, r) => s + r.line, 0);
+  // «جمع کالاها» at list prices; «تخفیف» is what the campaigns (and a code,
+  // if one ever exists) take off. A code applies to the discounted prices,
+  // as on the payment server, so the two totals are the same number.
+  const subtotal = rows.reduce((s, r) => s + r.listLine, 0);
+  const saleSubtotal = rows.reduce((s, r) => s + r.line, 0);
+  const campaignDiscount = subtotal - saleSubtotal;
   const rate = state.appliedCode ? DISCOUNT_CODES[state.appliedCode] : 0;
-  const discount = Math.round(subtotal * rate);
-  const base = subtotal - discount;
+  const codeDiscount = Math.round(saleSubtotal * rate);
+  const discount = campaignDiscount + codeDiscount;
+  const base = saleSubtotal - codeDiscount;
 
   const method = SHIPPING.find((s) => s.id === state.ship) || SHIPPING[0];
   // Both پیک and تیپاکس are payAtDoor now, which already excludes a method
@@ -624,7 +732,7 @@ function totals() {
   const fees = cityFees(state.form.city);
   const feeTotal = fees.reduce((sum, f) => sum + f.amount, 0);
 
-  return { rows, subtotal, discount, base, method, freeShip, shipCost, shipLabel, fees, total: base + shipCost + feeTotal };
+  return { rows, subtotal, campaignDiscount, codeDiscount, discount, base, method, freeShip, shipCost, shipLabel, fees, total: base + shipCost + feeTotal };
 }
 
 /** The «هزینه بسته‌بندی» row(s) of a summary — empty only before a city is chosen. */
@@ -1100,7 +1208,7 @@ function card(p) {
         </div>
         <span class="card-meta">${esc(p.meta)}${p.variants && p.variants.length > 1 ? ' · چند اندازه' : ''}</span>
         <div class="card-price">
-          <b>${p.priceFa}</b>
+          ${p.campaign ? salePriceHtml(saleOf(p, p.listPrice)) : `<b>${p.priceFa}</b>`}
           ${p.provisional ? '<span class="temp-flag">موقت</span>' : ''}
         </div>
         <button class="btn ${p.inStock ? 'btn-primary' : 'btn-ghost'} btn-block"
@@ -1387,9 +1495,12 @@ function screenProduct() {
   const effectiveShadeType =
     sizeShades.find((t) => t.key === state.selectedShade && t.in_stock) || sizeShades.find((t) => t.in_stock) || null;
   const effectiveShade = effectiveShadeType ? effectiveShadeType.key : null;
-  const shadePrice = (v, shade) =>
+  // List price of a size (and shade); shown through saleOf() everywhere.
+  const shadeListPrice = (v, shade) =>
     hasShades && v.shades && shade != null && Object.hasOwn(v.shades, shade) ? Number(v.shades[shade]) : v.price;
-  const effectivePrice = effectiveVariant ? shadePrice(effectiveVariant, effectiveShade) : p.price;
+  const shadePrice = (v, shade) => saleOf(p, shadeListPrice(v, shade)).price;
+  const effectiveSale = saleOf(p, effectiveVariant ? shadeListPrice(effectiveVariant, effectiveShade) : p.listPrice ?? p.price);
+  const effectivePrice = effectiveSale.price;
   // In stock, and for a product with shades, a shade available at this size.
   const canBuy = p.inStock && (!hasShades || effectiveShade != null);
   const effectivePriceFa = money(effectivePrice);
@@ -1421,10 +1532,11 @@ function screenProduct() {
         ${p.en ? `<div class="latin-name" style="font-size:19px;margin-top:4px">${esc(p.en)}</div>` : ''}
 
         <div class="price-row">
-          <b>${effectivePriceFa}</b>
+          ${effectiveSale.campaign ? salePriceHtml(effectiveSale) : `<b>${effectivePriceFa}</b>`}
           ${p.provisional ? '<span class="temp-flag">قیمت موقت</span>' : ''}
           ${!p.inStock ? '<span class="temp-flag" style="background:var(--color-neutral-200);color:var(--color-neutral-700)">ناموجود</span>' : ''}
         </div>
+        ${effectiveSale.campaign ? `<div class="sale-note">تخفیف «${esc(effectiveSale.campaign.name)}» — روی همه‌ی اندازه‌ها و شیدها</div>` : ''}
 
         <p class="lead" style="margin-top:18px">${esc(p.desc)}</p>
 
@@ -1582,7 +1694,9 @@ function screenCart() {
             <div data-act="open" data-id="${r.id}">${media(r)}</div>
             <div>
               <b data-act="open" data-id="${r.id}">${esc(r.fa)}</b>
-              <div class="cart-meta">${esc(r.meta)} · واحد ${r.priceFa}</div>
+              <div class="cart-meta">${esc(r.meta)} · واحد ${
+                r.sale.campaign ? `<s class="price-was">${money(r.listPrice)}</s> ${r.priceFa} ${saleBadgeHtml(r.sale)}` : r.priceFa
+              }</div>
               <div class="qty" style="margin-top:10px">
                 <button data-act="row-dec" data-id="${r.cartKey}" aria-label="کم کردن">${icon('minus', 'icon icon-sm')}</button>
                 <span>${FA(r.qty)}</span>
@@ -1603,7 +1717,7 @@ function screenCart() {
       <aside class="panel">
         <h3>خلاصه‌ی سفارش</h3>
         <div class="sum-row"><span>جمع کالاها</span><span>${money(t.subtotal)}</span></div>
-        <div class="sum-row"><span>تخفیف</span><span class="${t.discount ? 'sage' : ''}">${
+        <div class="sum-row"><span>تخفیف</span><span class="${t.discount ? 'sage' : ''}" data-sum="discount">${
     t.discount ? '− ' + money(t.discount) : '—'
   }</span></div>
         <div class="sum-row"><span>ارسال (${esc(t.method.label)})</span><span class="${
@@ -1747,8 +1861,8 @@ function screenCheckout() {
           .map(
             (r) => `
           <div class="sum-row">
-            <span>${esc(r.fa)}${r.shadeFa ? ' (' + esc(r.heightFa + ' · ' + r.shadeFa) + ')' : ''} × ${FA(r.qty)}</span>
-            <span>${money(r.line)}</span>
+            <span>${esc(r.fa)}${r.shadeFa ? ' (' + esc(r.heightFa + ' · ' + r.shadeFa) + ')' : ''} × ${FA(r.qty)}${saleBadgeHtml(r.sale)}</span>
+            <span>${r.sale.campaign ? `<s class="price-was">${money(r.listLine)}</s> ` : ''}${money(r.line)}</span>
           </div>`
           )
           .join('')}
@@ -1757,7 +1871,7 @@ function screenCheckout() {
         </div>
         ${
           t.discount
-            ? `<div class="sum-row"><span>تخفیف ${esc(state.appliedCode)}</span><span class="sage">− ${money(
+            ? `<div class="sum-row"><span>تخفیف${state.appliedCode ? ' ' + esc(state.appliedCode) : ''}</span><span class="sage">− ${money(
                 t.discount
               )}</span></div>`
             : ''
@@ -2417,6 +2531,9 @@ function placeOrder() {
     items: t.rows.map((r) => ({ cartKey: r.cartKey, qty: r.qty })),
     shipping_method: state.ship,
     discount_code: state.appliedCode,
+    // The total on screen. The payment server prices the order itself and
+    // only compares: a different total (a campaign ended…) means no order.
+    expected_total: t.total,
   };
 
   startOnlinePayment(payload, fail);
@@ -2458,6 +2575,7 @@ function startOnlinePayment(payload, fail) {
   })
     .then((r) => r.json())
     .then((res) => {
+      if (res.code === 'price_changed') return priceChanged(res, fail);
       if (!res.ok) return fail(res.error || GATEWAY_FAIL);
       // Only ever leave the site for ZarinPal's own StartPay page.
       if (typeof res.url !== 'string' || !ZARINPAL_STARTPAY.test(res.url)) return fail(GATEWAY_FAIL);
@@ -2467,6 +2585,19 @@ function startOnlinePayment(payload, fail) {
     })
     .catch(() => fail(ctrl.signal.aborted ? GATEWAY_TIMEOUT : GATEWAY_FAIL))
     .finally(() => clearTimeout(timer));
+}
+
+/** The payment server's total differs from the one shown (a campaign
+ * ended or started, a price changed): nothing was ordered or charged.
+ * Reload prices and campaigns, show the new total, and let the customer
+ * press «پرداخت آنلاین» again. */
+function priceChanged(res, fail) {
+  const shown = Number.isSafeInteger(res.total) ? 'مبلغ جدید: ' + money(res.total) + '. ' : '';
+  const msg =
+    'مبلغ سفارش تغییر کرده است (مثلاً یک تخفیف تمام یا شروع شده است). ' +
+    shown +
+    'هیچ مبلغی پرداخت نشده است؛ سبد را بررسی کنید و دوباره «پرداخت آنلاین» را بزنید.';
+  return refreshPrices().then(() => fail(msg), () => fail(msg));
 }
 
 // Coming back from ZarinPal with the browser's Back button can restore this
@@ -3067,6 +3198,45 @@ async function loadProductsFromSupabase() {
     return;
   }
 
+  CAMPAIGNS = await fetchCampaigns(getSupabaseClient());
+  applyCatalog(data);
+  state.catalog = 'ready';
+  render();
+}
+
+/** The running campaigns. The database's policy returns only active ones;
+ * none (and full prices) if they can't be read — the payment server still
+ * decides, and checkout then shows its total. */
+async function fetchCampaigns(sb, timeoutMs = 5000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const { data, error } = await sb
+      .from('discount_campaigns')
+      .select('id, name, percent, scope, collections, product_slugs, starts_at, ends_at, enabled')
+      .abortSignal(ctrl.signal);
+    if (error) throw new Error(error.message);
+    return (data || []).filter((c) => campaignIsActive(c, null));
+  } catch (e) {
+    console.warn('[glow] discount campaigns unavailable:', e.message);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Fresh prices and campaigns without the loading screen (after the
+ * payment server reported a different total). */
+async function refreshPrices() {
+  const sb = getSupabaseClient();
+  const data = await fetchCatalog(sb, CATALOG_TRY_MS[0]);
+  CAMPAIGNS = await fetchCampaigns(sb);
+  applyCatalog(data);
+}
+
+/** Turns catalog rows into PRODUCTS / ITEMS and drops cart lines that can
+ * no longer be priced. */
+function applyCatalog(data) {
   PRODUCTS = data.map((r) => ({
     id: r.slug,
     fa: r.name_fa,
@@ -3110,8 +3280,6 @@ async function loadProductsFromSupabase() {
     const p = byId(state.param);
     if (p) state.selectedHeight = p.height;
   }
-  state.catalog = 'ready';
-  render();
 }
 
 loadProductsFromSupabase();
