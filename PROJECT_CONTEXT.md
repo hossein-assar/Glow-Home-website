@@ -359,6 +359,27 @@ decisions from code alone — read this before making structural changes.
 - `photos`: ordered array, first element is always the "اصلی" (primary/hero)
   shot — when processing new product photos from a zip, a file with اصلی in
   its name goes first, everything else keeps its given order after it.
+  The storefront shows `photos` (else `photo_url`, else
+  `images/<slug>.jpg`), all of them — no limit, cover first, the rest in a
+  scrolling thumbnail row and the lightbox.
+- **Admin photo gallery** (`admin/admin.js`, «Photo gallery»): the same
+  editor in «افزودن محصول» and «ویرایش کامل» — thumbnails (the first marked
+  «عکس اصلی»), «افزودن عکس» (several files at once, or drag and drop onto
+  the box), and per photo «حذف», «انتقال به قبل/بعد» and «انتخاب به عنوان
+  عکس اصلی». At most `PHOTO_MAX_COUNT` = 8 (the shop has no limit). Every
+  file goes through the unchanged pipeline (JPEG/PNG/WebP ≤ 15 MB, upright,
+  ≤ 1600 px, JPEG 0.85 so no EXIF, safe ASCII name, `product-images`,
+  `upsert: false`, canonical supabase.co URL) in `uploadPhotoFile()`, one
+  file at a time (`addPhotoFiles()`); a failed file gets its own Persian
+  error line with its name and never stops the others; saving waits for
+  uploads. Saves write the whole ordered list in one update with
+  `photo_url = photos[0]` (`galleryFields()` / `newProductPhotoFields()`),
+  and only when the list changed, so an untouched product is never
+  rewritten. A new product with no photo still sends `photo_url: null`
+  only. «آدرس دستی (پیشرفته)» is the cover's address (`gallerySetCover()`).
+  An existing product can't be saved with no photo. Removing a photo only
+  takes it off the product; files in the bucket are never deleted. Tests:
+  `admin-gallery.test.js`.
 
 ### Why some products are split and others are merged
 

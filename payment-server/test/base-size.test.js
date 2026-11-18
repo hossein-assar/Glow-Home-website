@@ -272,10 +272,12 @@ function adminEnv(cached, { fHeight = cached.height_cm ?? '', priceBox = cached.
       grab(adminJs, /const SHADE_TYPES = [^\n]*\n/),
       grab(adminJs, /const SHADE_NAME_MAX = [^\n]*\n/),
       grab(adminJs, /const photoUploads = [^\n]*\n/),
-      ...['escapeHtml', 'escapeAttr', 'toLatinDigits', 'unformatPrice', 'formatPrice', 'mainPhoto', 'mainPhotoFields',
+      grab(adminJs, /const PHOTO_MAX_COUNT = [^\n]*\n/),
+      grab(adminJs, /const photoGalleries = [^\n]*\n/),
+      ...['escapeHtml', 'escapeAttr', 'toLatinDigits', 'unformatPrice', 'formatPrice', 'initialPhotos', 'mainPhoto', 'galleryFields', 'gallerySetCover', 'galleryPhotos',
         'withBaseSize', 'baseSizeOf', 'sizesToSave', 'syncBaseRow', 'baseRowHtml', 'variantRowHtml', 'shadeTypesOf', 'shadeModelOf', 'plainSizesBlockHtml', 'shadeBlockHtml', 'readShadeBlock', 'shadeFormToSave', 'shadesNeedMigration', 'faNum',
         'editPanelHtml', 'saveProduct', 'saveProductFull'].map((n) => fnSrc(adminJs, n)),
-      'const photoFieldHtml = () => "";',
+      'const photoGalleryFieldHtml = () => "";',
       'return { editPanelHtml, syncBaseRow, saveProduct, saveProductFull };',
     ].join('\n')
   )(document, sb, [cached], () => {});

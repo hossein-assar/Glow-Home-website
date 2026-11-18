@@ -275,7 +275,7 @@ test('admin: retry buttons for login check, products and orders; no raw error te
 });
 
 test('admin photo upload: stores the canonical supabase.co URL and stays under the proxy body limit', () => {
-  assert.match(adminJs, /urlInput\.value = canonicalPhotoUrl\(data\.publicUrl\);/);
+  assert.match(adminJs, /return \{ url: canonicalPhotoUrl\(data\.publicUrl\) \};/);
   assert.match(adminJs, /const PHOTO_UPLOAD_MAX_BYTES = 4 \* 1024 \* 1024;/);
   assert.match(adminJs, /if \(prepared\.blob\.size > PHOTO_UPLOAD_MAX_BYTES\) \{/);
   // the guard runs before the upload

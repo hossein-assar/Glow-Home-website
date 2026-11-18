@@ -347,12 +347,12 @@ function syncBaseRow(id) {
 }
 
 /* ---- Photo upload ----------------------------------------------------------
-   «انتخاب عکس از کامپیوتر» (or drag-and-drop onto the preview): the photo is
+   Every file added to a gallery (see «Photo gallery» below) is
    checked, turned upright (the browser applies the EXIF orientation when
    decoding), shrunk to at most 1600 px on the longest side, re-encoded as
    JPEG 0.85 (a PNG with transparency stays PNG), and uploaded to the public
    Supabase Storage bucket «product-images» (supabase/migration-product-
-   images-bucket.sql). Its public URL goes into the photo field; the product
+   images-bucket.sql). Its public URL goes into the gallery; the product
    itself is only saved by the usual save button. Old files are never
    deleted. */
 
@@ -363,7 +363,7 @@ const PHOTO_MAX_SIDE = 1600;
 // Uploads go through our /sb proxy on Vercel; Vercel's documented request-body
 // cap (for functions) is 4.5 MB, so stay under it after resizing.
 const PHOTO_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
-const photoUploads = new Set(); // photo fields with an upload in flight
+const photoUploads = new Set(); // photo editors with an upload in flight
 
 /** '' when the file may be processed, else a Persian error. */
 function checkPhotoFile(file) {
@@ -457,133 +457,321 @@ function photoUploadError(error) {
   return 'آپلود انجام نشد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.';
 }
 
-/** Markup for one photo field; `key` is "new" or a product id. The URL input
- * (id = urlInputId) is what the save code reads, as before. */
-function photoFieldHtml(key, urlInputId, path) {
-  const src = resolvePhotoSrc(path);
+/* ---- Photo gallery ----------------------------------------------------------
+   One editor for «افزودن محصول» and «ویرایش کامل»: a row of thumbnails, the
+   first one the cover («عکس اصلی», what the shop shows first). «افزودن عکس»
+   (several files at once, or drag and drop) sends each file through the
+   pipeline above, one at a time; a file that fails shows its own error and
+   never stops the others. Each thumbnail has «حذف», «انتقال به قبل/بعد» and
+   (all but the cover) «انتخاب به عنوان عکس اصلی». Saving writes the whole
+   ordered list in one update with photo_url = photos[0]; removing a photo
+   only takes it off the product (the file stays in the bucket). The
+   storefront has no limit; the editor stops at PHOTO_MAX_COUNT. */
+
+const PHOTO_MAX_COUNT = 8;
+const photoGalleries = {}; // key ("new" or a product id) → { list, pending, errors, queue, render }
+
+/** The product's photos in shop order: photos when there are any, else
+ * [photo_url], else [] (the same rule as app.js). */
+function initialPhotos(p) {
+  const photos = Array.isArray(p && p.photos) ? p.photos.map((s) => String(s ?? '').trim()).filter(Boolean) : [];
+  if (photos.length) return photos;
+  const url = String((p && p.photo_url) || '').trim();
+  return url ? [url] : [];
+}
+
+/** The photo the storefront shows first. */
+function mainPhoto(p) {
+  return initialPhotos(p)[0] || '';
+}
+
+/** Adds url at the end; unchanged when full, empty or already there. */
+function galleryAdd(list, url) {
+  const u = String(url ?? '').trim();
+  if (!u || list.includes(u) || list.length >= PHOTO_MAX_COUNT) return list;
+  return [...list, u];
+}
+
+function galleryRemove(list, i) {
+  return i >= 0 && i < list.length ? list.filter((_, j) => j !== i) : list;
+}
+
+/** Moves photo i by delta (-1 earlier, +1 later); unchanged at either end. */
+function galleryMove(list, i, delta) {
+  const j = i + delta;
+  if (i < 0 || i >= list.length || j < 0 || j >= list.length) return list;
+  const next = [...list];
+  [next[i], next[j]] = [next[j], next[i]];
+  return next;
+}
+
+/** Photo i becomes the cover; the others keep their order. */
+function galleryMakeCover(list, i) {
+  if (i <= 0 || i >= list.length) return list;
+  return [list[i], ...list.filter((_, j) => j !== i)];
+}
+
+/** «آدرس دستی (پیشرفته)»: the typed address replaces the cover (or becomes
+ * it on an empty list); emptied, the cover is removed. Same value: unchanged. */
+function gallerySetCover(list, url) {
+  const u = String(url ?? '').trim();
+  if (u === (list[0] || '')) return list;
+  if (!u) return list.slice(1);
+  const rest = list.slice(1).filter((x) => x !== u);
+  return [u, ...rest].slice(0, PHOTO_MAX_COUNT);
+}
+
+/** How many more files fit, counting uploads still in flight. */
+function galleryRoom(list, pending = 0) {
+  return Math.max(0, PHOTO_MAX_COUNT - list.length - pending);
+}
+
+function galleryLimitMessage(skipped) {
+  return `هر محصول حداکثر ${faNum(PHOTO_MAX_COUNT)} عکس دارد؛ ${faNum(skipped)} عکس اضافه نشد.`;
+}
+
+/** Fields for «ویرایش کامل»: the whole ordered list and its cover in one
+ * update, or null when the list is what the product already has. */
+function galleryFields(p, list) {
+  const clean = list.map((s) => String(s ?? '').trim()).filter(Boolean);
+  const before = initialPhotos(p || {});
+  if (clean.length === before.length && clean.every((u, i) => u === before[i])) return null;
+  return { photo_url: clean[0] || null, photos: clean };
+}
+
+/** Fields for «افزودن محصول»: no photo → photo_url null as before (photos
+ * keeps its database default); else the list and its cover. */
+function newProductPhotoFields(list) {
+  const clean = list.map((s) => String(s ?? '').trim()).filter(Boolean);
+  return clean.length ? { photo_url: clean[0], photos: clean } : { photo_url: null };
+}
+
+/** The list to save: the editor's list with the manual cover address
+ * applied, or the row's own photos when no editor is open. */
+function galleryPhotos(key, urlInputId, row) {
+  const g = photoGalleries[key];
+  if (!g) return initialPhotos(row || {});
+  const input = document.getElementById(urlInputId);
+  if (input) g.list = gallerySetCover(g.list, input.value);
+  return [...g.list];
+}
+
+let lastPhotoStamp = 0;
+
+/** One file through the pipeline: { url } or { error } (Persian). Never throws. */
+async function uploadPhotoFile(file, slug) {
+  const problem = checkPhotoFile(file);
+  if (problem) return { error: problem };
+  let prepared;
+  try {
+    prepared = await preparePhoto(file);
+  } catch (err) {
+    console.error('[admin] photo decode failed:', err);
+    return { error: 'این عکس باز نشد. فایل دیگری را امتحان کنید.' };
+  }
+  if (prepared.blob.size > PHOTO_UPLOAD_MAX_BYTES) {
+    return { error: 'حجم عکس بعد از فشرده‌سازی هنوز زیاد است. عکس دیگری انتخاب کنید.' };
+  }
+  try {
+    // A fresh name for every file, even two in the same millisecond.
+    lastPhotoStamp = Math.max(Date.now(), lastPhotoStamp + 1);
+    const name = photoFileName(slug, lastPhotoStamp, prepared.ext);
+    const { error } = await sb.storage
+      .from(PHOTO_BUCKET)
+      .upload(name, prepared.blob, { contentType: prepared.type, cacheControl: '31536000', upsert: false });
+    if (error) {
+      console.error('[admin] photo upload failed:', error);
+      return { error: photoUploadError(error) };
+    }
+    // Store the canonical supabase.co URL (the client's own URL is this
+    // site's /sb proxy); previews and the shop rewrite it for display.
+    const { data } = sb.storage.from(PHOTO_BUCKET).getPublicUrl(name);
+    return { url: canonicalPhotoUrl(data.publicUrl) };
+  } catch (err) {
+    console.error('[admin] photo upload failed:', err);
+    return { error: photoUploadError(err) };
+  }
+}
+
+/** Queues files on gallery g: as many as fit, one upload at a time, each
+ * success added in order, each failure listed by file name. `upload` is
+ * uploadPhotoFile; `onChange` re-renders. Resolves when this batch is done. */
+function addPhotoFiles(key, g, files, slug, upload, onChange) {
+  files = [...files];
+  if (!g.pending.length) g.errors = [];
+  const take = files.slice(0, galleryRoom(g.list, g.pending.length));
+  if (files.length > take.length) g.errors.push(galleryLimitMessage(files.length - take.length));
+  const jobs = take.map((file) => ({ name: String((file && file.name) || 'عکس'), state: 'waiting' }));
+  if (jobs.length) {
+    g.pending.push(...jobs);
+    photoUploads.add(key);
+  }
+  onChange();
+  take.forEach((file, i) => {
+    const job = jobs[i];
+    g.queue = g.queue.then(async () => {
+      job.state = 'uploading';
+      onChange();
+      let result;
+      try {
+        result = await upload(file, slug);
+      } catch (err) {
+        result = { error: photoUploadError(err) };
+      }
+      g.pending = g.pending.filter((j) => j !== job);
+      if (result && result.url) {
+        const next = galleryAdd(g.list, result.url);
+        if (next === g.list && !g.list.includes(result.url)) g.errors.push(`«${job.name}»: ${galleryLimitMessage(1)}`);
+        g.list = next;
+      } else {
+        g.errors.push(`«${job.name}»: ${(result && result.error) || photoUploadError(null)}`);
+      }
+      if (!g.pending.length) photoUploads.delete(key);
+      onChange();
+    });
+  });
+  return g.queue;
+}
+
+/** The thumbnails, the files in flight and the «افزودن عکس» tile. */
+function galleryHtml(list, pending = []) {
+  const last = list.length - 1;
+  const tiles = list.map(
+    (url, i) => `
+      <div class="pg-tile${i === 0 ? ' cover' : ''}" data-i="${i}">
+        <div class="pg-img">
+          <img src="${escapeAttr(resolvePhotoSrc(url))}" alt="عکس ${faNum(i + 1)}">
+          <span class="pg-broken">نمایش داده نمی‌شود</span>
+          ${i === 0 ? '<span class="pg-cover-badge">عکس اصلی</span>' : ''}
+        </div>
+        <div class="pg-actions">
+          <button type="button" class="pg-btn" data-g="earlier" data-i="${i}" aria-label="انتقال به قبل" title="انتقال به قبل" ${i === 0 ? 'disabled' : ''}>→</button>
+          <button type="button" class="pg-btn" data-g="later" data-i="${i}" aria-label="انتقال به بعد" title="انتقال به بعد" ${i === last ? 'disabled' : ''}>←</button>
+          <button type="button" class="pg-btn pg-remove" data-g="remove" data-i="${i}">حذف</button>
+        </div>
+        ${i > 0 ? `<button type="button" class="pg-btn pg-make-cover" data-g="cover" data-i="${i}">انتخاب به عنوان عکس اصلی</button>` : ''}
+      </div>`
+  );
+  const waiting = pending.map(
+    (job) => `
+      <div class="pg-tile pending">
+        <div class="pg-img"><span class="pg-wait">${job.state === 'uploading' ? 'در حال آپلود…' : 'در صف آپلود'}<small dir="auto">${escapeHtml(job.name)}</small></span></div>
+      </div>`
+  );
+  const full = !galleryRoom(list, pending.length);
+  const add = full
+    ? `<div class="pg-full">به حداکثر ${faNum(PHOTO_MAX_COUNT)} عکس رسیده‌اید. برای عکس تازه، یکی را حذف کنید.</div>`
+    : `<button type="button" class="pg-add" data-g="add"><span class="pg-plus">+</span>افزودن عکس<small>چند عکس با هم، یا اینجا رها کنید</small></button>`;
+  return [...tiles, ...waiting, add].join('');
+}
+
+/** The editor's frame; wirePhotoGallery() fills the thumbnails. The URL
+ * input (id = urlInputId) holds the cover's address, as before. */
+function photoGalleryFieldHtml(key, urlInputId, photos) {
   return `
-    <div class="photo-field">
-      <div class="photo-drop" id="photo-drop-${key}" title="عکس را اینجا رها کنید">
-        <img id="photo-preview-${key}" alt="" ${src ? `src="${escapeAttr(src)}"` : 'hidden'}>
-        <span class="photo-empty" id="photo-empty-${key}" ${src ? 'hidden' : ''}>بدون عکس<br>عکس را اینجا رها کنید</span>
-      </div>
-      <div class="photo-side">
-        <button type="button" class="btn ghost" id="photo-pick-${key}">انتخاب عکس از کامپیوتر</button>
-        <input type="file" id="photo-file-${key}" accept="image/jpeg,image/png,image/webp" hidden>
-        <div class="msg" id="photo-status-${key}"></div>
-        <details class="photo-manual">
-          <summary>آدرس دستی (پیشرفته)</summary>
-          <input id="${urlInputId}" dir="ltr" value="${escapeAttr(path || '')}" placeholder="images/xxx.jpg">
-        </details>
-      </div>
+    <div class="photo-gallery" id="pg-${key}">
+      <div class="pg-thumbs" id="pg-thumbs-${key}">${galleryHtml(photos)}</div>
+      <input type="file" id="pg-file-${key}" accept="image/jpeg,image/png,image/webp" multiple hidden>
+      <div class="pg-hint">عکس اول، عکس اصلی است (همان که در فروشگاه اول دیده می‌شود). حداکثر ${faNum(PHOTO_MAX_COUNT)} عکس.</div>
+      <div class="msg" id="pg-status-${key}" role="status" aria-live="polite"></div>
+      <ul class="pg-errors" id="pg-errors-${key}"></ul>
+      <details class="photo-manual">
+        <summary>آدرس دستی (پیشرفته)</summary>
+        <span class="pg-hint">آدرس عکس اصلی</span>
+        <input id="${urlInputId}" dir="ltr" value="${escapeAttr(photos[0] || '')}" placeholder="images/xxx.jpg">
+      </details>
     </div>`;
 }
 
-/** Wires a rendered photo field. slugOf() gives the product slug for the file name. */
-function wirePhotoField(key, urlInputId, slugOf) {
-  const drop = document.getElementById(`photo-drop-${key}`);
-  const preview = document.getElementById(`photo-preview-${key}`);
-  const empty = document.getElementById(`photo-empty-${key}`);
-  const pick = document.getElementById(`photo-pick-${key}`);
-  const fileInput = document.getElementById(`photo-file-${key}`);
-  const status = document.getElementById(`photo-status-${key}`);
+/** Wires a rendered editor. slugOf() gives the product slug for file names. */
+function wirePhotoGallery(key, urlInputId, slugOf, photos) {
+  const root = document.getElementById(`pg-${key}`);
+  const thumbs = document.getElementById(`pg-thumbs-${key}`);
+  const fileInput = document.getElementById(`pg-file-${key}`);
+  const status = document.getElementById(`pg-status-${key}`);
+  const errors = document.getElementById(`pg-errors-${key}`);
   const urlInput = document.getElementById(urlInputId);
+  const g = (photoGalleries[key] = { list: [...photos], initial: [...photos], pending: [], errors: [], queue: Promise.resolve() });
 
-  const showPreview = (path) => {
-    const src = resolvePhotoSrc(path);
-    preview.hidden = !src;
-    empty.hidden = !!src;
-    if (src) preview.src = src;
-    else preview.removeAttribute('src');
-  };
-  const setStatus = (text, cls = '') => {
-    status.textContent = text;
-    status.className = 'msg' + (cls ? ' ' + cls : '');
-  };
-
-  async function upload(file) {
-    if (photoUploads.has(key)) return;
-    const problem = checkPhotoFile(file);
-    if (problem) return setStatus(problem, 'error');
-
-    photoUploads.add(key);
-    pick.disabled = true;
-    setStatus('در حال آپلود…');
-    try {
-      let prepared;
-      try {
-        prepared = await preparePhoto(file);
-      } catch (err) {
-        console.error('[admin] photo decode failed:', err);
-        return setStatus('این عکس باز نشد. فایل دیگری را امتحان کنید.', 'error');
-      }
-      if (prepared.blob.size > PHOTO_UPLOAD_MAX_BYTES) {
-        return setStatus('حجم عکس بعد از فشرده‌سازی هنوز زیاد است. عکس دیگری انتخاب کنید.', 'error');
-      }
-      const name = photoFileName(slugOf(), Date.now(), prepared.ext);
-      const { error } = await sb.storage
-        .from(PHOTO_BUCKET)
-        .upload(name, prepared.blob, { contentType: prepared.type, cacheControl: '31536000', upsert: false });
-      if (error) {
-        console.error('[admin] photo upload failed:', error);
-        return setStatus(photoUploadError(error), 'error');
-      }
-      // Store the canonical supabase.co URL (the client's own URL is this
-      // site's /sb proxy); previews and the shop rewrite it for display.
-      const { data } = sb.storage.from(PHOTO_BUCKET).getPublicUrl(name);
-      urlInput.value = canonicalPhotoUrl(data.publicUrl);
-      showPreview(urlInput.value);
-      setStatus('عکس آپلود شد. برای ثبت، محصول را ذخیره کنید.', 'ok');
-    } catch (err) {
-      console.error('[admin] photo upload failed:', err);
-      setStatus(photoUploadError(err), 'error');
-    } finally {
-      photoUploads.delete(key);
-      pick.disabled = false;
-      fileInput.value = '';
+  g.render = () => {
+    thumbs.innerHTML = galleryHtml(g.list, g.pending);
+    if (document.activeElement !== urlInput) urlInput.value = g.list[0] || '';
+    errors.innerHTML = g.errors.map((e) => `<li>${escapeHtml(e)}</li>`).join('');
+    if (g.pending.length) {
+      status.textContent = `در حال آپلود… ${faNum(g.pending.length)} عکس مانده. صبر کنید تا تمام شود.`;
+      status.className = 'msg';
+    } else if (g.list.join('\n') !== g.initial.join('\n')) {
+      status.textContent = 'برای ثبت تغییر عکس‌ها، محصول را ذخیره کنید.';
+      status.className = 'msg ok';
+    } else {
+      status.textContent = '';
+      status.className = 'msg';
     }
-  }
+  };
+  const change = (next) => {
+    g.list = next;
+    g.render();
+  };
+  const addFiles = (files) => {
+    if (!files || !files.length) return;
+    addPhotoFiles(key, g, files, slugOf(), uploadPhotoFile, g.render);
+  };
 
-  pick.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', () => fileInput.files[0] && upload(fileInput.files[0]));
-  urlInput.addEventListener('input', () => showPreview(urlInput.value));
-  preview.addEventListener('error', () => setStatus('این عکس نمایش داده نمی‌شود. آدرس را بررسی کنید.', 'error'));
-  drop.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    drop.classList.add('dragging');
+  thumbs.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-g]');
+    if (!btn || btn.disabled) return;
+    const i = Number(btn.dataset.i);
+    const act = btn.dataset.g;
+    if (act === 'add') fileInput.click();
+    else if (act === 'remove') change(galleryRemove(g.list, i));
+    else if (act === 'earlier') change(galleryMove(g.list, i, -1));
+    else if (act === 'later') change(galleryMove(g.list, i, 1));
+    else if (act === 'cover') change(galleryMakeCover(g.list, i));
   });
-  drop.addEventListener('dragleave', () => drop.classList.remove('dragging'));
-  drop.addEventListener('drop', (e) => {
-    e.preventDefault();
-    drop.classList.remove('dragging');
-    const file = e.dataTransfer && e.dataTransfer.files[0];
-    if (file) upload(file);
+  // A thumbnail whose address doesn't load says so instead of a broken icon.
+  thumbs.addEventListener('error', (e) => {
+    const tile = e.target.closest && e.target.closest('.pg-tile');
+    if (tile) tile.classList.add('broken');
+  }, true);
+  fileInput.addEventListener('change', () => {
+    const files = [...fileInput.files];
+    fileInput.value = '';
+    addFiles(files);
   });
+  urlInput.addEventListener('change', () => change(gallerySetCover(g.list, urlInput.value)));
+  root.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    root.classList.add('dragging');
+  });
+  root.addEventListener('dragleave', (e) => {
+    if (!root.contains(e.relatedTarget)) root.classList.remove('dragging');
+  });
+  root.addEventListener('drop', (e) => {
+    e.preventDefault();
+    root.classList.remove('dragging');
+    addFiles(e.dataTransfer && e.dataTransfer.files);
+  });
+  g.render();
+  return g;
 }
 
-// A photo dropped next to (not onto) a drop box must not make the browser
+/** Empties an editor (after «افزودن محصول» succeeds). */
+function resetPhotoGallery(key) {
+  const g = photoGalleries[key];
+  if (!g) return;
+  g.list = [];
+  g.initial = [];
+  g.errors = [];
+  g.render();
+}
+
+// A photo dropped next to (not onto) an editor must not make the browser
 // leave the panel to open the image.
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());
 
-document.getElementById('new-photo-field').innerHTML = photoFieldHtml('new', 'new-photo', '');
-wirePhotoField('new', 'new-photo', () => document.getElementById('new-slug').value);
-
-/** The photo the storefront shows first: photos[0] when there is a gallery,
- * else photo_url (same rule as app.js). */
-function mainPhoto(p) {
-  return (Array.isArray(p.photos) && p.photos[0]) || p.photo_url || '';
-}
-
-/** Fields to save when the main photo changed: photo_url and photos[0] move
- * together (the rest of the gallery stays); null when unchanged. */
-function mainPhotoFields(p, newPath) {
-  const path = String(newPath ?? '').trim();
-  if (path === mainPhoto(p)) return null;
-  const fields = { photo_url: path };
-  if (Array.isArray(p.photos) && p.photos.length) fields.photos = [path, ...p.photos.slice(1)];
-  return fields;
-}
+document.getElementById('new-photo-field').innerHTML = photoGalleryFieldHtml('new', 'new-photo', []);
+wirePhotoGallery('new', 'new-photo', () => document.getElementById('new-slug').value, []);
 
 let PRODUCTS_CACHE = [];
 let productSearchTerm = '';
@@ -730,8 +918,8 @@ function editPanelHtml(p) {
         </div>
         <div class="edit-grid wide" style="margin-top:10px">
           <div>
-            <label>عکس اصلی</label>
-            ${photoFieldHtml(p.id, `f-photo-${p.id}`, mainPhoto(p))}
+            <label>عکس‌ها</label>
+            ${photoGalleryFieldHtml(p.id, `f-photo-${p.id}`, initialPhotos(p))}
           </div>
         </div>
         <div class="edit-grid wide" style="margin-top:10px">
@@ -991,7 +1179,7 @@ function toggleEdit(id) {
 
   wireSizesBlock(id);
 
-  wirePhotoField(id, `f-photo-${id}`, () => p.slug);
+  wirePhotoGallery(id, `f-photo-${id}`, () => p.slug, initialPhotos(p));
   document.getElementById(`save-full-${id}`).addEventListener('click', () => saveProductFull(id));
 }
 
@@ -1031,7 +1219,7 @@ async function saveProduct(id) {
 async function saveProductFull(id) {
   const msg = document.getElementById(`save-full-msg-${id}`);
   if (photoUploads.has(id)) {
-    msg.textContent = 'صبر کنید تا آپلود عکس تمام شود.';
+    msg.textContent = 'صبر کنید تا آپلود عکس‌ها تمام شود.';
     msg.className = 'msg error';
     return;
   }
@@ -1105,16 +1293,17 @@ async function saveProductFull(id) {
     if (sizes.price != null) basePrice = sizes.price;
   }
 
-  const photoPath = document.getElementById(`f-photo-${id}`).value.trim();
-  if (!photoPath && mainPhoto(cachedRow || {})) {
-    msg.textContent = 'خطا: عکس اصلی را نمی‌توان خالی گذاشت. برای عوض کردن، عکس دیگری انتخاب کنید.';
+  const photos = galleryPhotos(id, `f-photo-${id}`, cachedRow);
+  if (!photos.length && initialPhotos(cachedRow || {}).length) {
+    msg.textContent = 'خطا: محصول بدون عکس نمی‌ماند. پیش از حذف آخرین عکس، عکس دیگری اضافه کنید.';
     msg.className = 'msg error';
     return;
   }
 
   const fields = { name_fa, name_en, subcategory, style, material, height_cm, description, colors, variants };
   if (basePrice != null) fields.price = basePrice;
-  const photoFields = mainPhotoFields(cachedRow || {}, photoPath);
+  // The whole ordered list and its cover, only when the gallery changed.
+  const photoFields = galleryFields(cachedRow || {}, photos);
   if (photoFields) Object.assign(fields, photoFields);
   // body_size / shade_size only exist after supabase/migration-lamp-sizes.sql.
   // Send them only when the loaded row has them, so a save still works if
@@ -1138,6 +1327,11 @@ async function saveProductFull(id) {
   // reloading would collapse this panel immediately, hiding the very
   // confirmation message we're about to show.
   if (cachedRow) Object.assign(cachedRow, fields);
+  const g = photoGalleries[id];
+  if (g && g.render) {
+    g.initial = [...photos];
+    g.render();
+  }
   const nameCell = document.getElementById(`name-${id}`);
   if (nameCell) nameCell.textContent = name_fa;
 
@@ -1158,7 +1352,7 @@ async function deleteProduct(id, name) {
 document.getElementById('btn-add').addEventListener('click', async () => {
   const addMsg = document.getElementById('add-msg');
   if (photoUploads.has('new')) {
-    addMsg.textContent = 'صبر کنید تا آپلود عکس تمام شود.';
+    addMsg.textContent = 'صبر کنید تا آپلود عکس‌ها تمام شود.';
     addMsg.className = 'msg error';
     return;
   }
@@ -1172,7 +1366,7 @@ document.getElementById('btn-add').addEventListener('click', async () => {
     material: document.getElementById('new-material').value.trim() || null,
     height_cm: document.getElementById('new-height').value ? Number(document.getElementById('new-height').value) : null,
     price: Number(unformatPrice(document.getElementById('new-price').value)) || 0,
-    photo_url: document.getElementById('new-photo').value.trim() || null,
+    ...newProductPhotoFields(galleryPhotos('new', 'new-photo', null)),
     description: document.getElementById('new-desc').value.trim() || null,
   };
   // Only sent when filled in, so adding a product still works before
@@ -1199,11 +1393,10 @@ document.getElementById('btn-add').addEventListener('click', async () => {
   addMsg.className = 'msg ok';
   [
     'new-slug', 'new-name-fa', 'new-name-en', 'new-subcategory', 'new-material',
-    'new-height', 'new-price', 'new-photo', 'new-desc', 'new-body-size', 'new-shade-size',
+    'new-height', 'new-price', 'new-desc', 'new-body-size', 'new-shade-size',
   ].forEach((id) => (document.getElementById(id).value = ''));
   document.getElementById('new-style').value = '';
-  document.getElementById('new-photo').dispatchEvent(new Event('input')); // clear the preview
-  document.getElementById('photo-status-new').textContent = '';
+  resetPhotoGallery('new');
   loadProducts();
 });
 

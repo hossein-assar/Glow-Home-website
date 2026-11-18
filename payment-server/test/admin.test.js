@@ -28,10 +28,10 @@ const fns = new Function(
   configJs + '\n' +
   [
     'toLatinDigits', 'unformatPrice', 'formatPrice', 'reformatPriceInput',
-    'checkPhotoFile', 'fitWithin', 'photoFileName', 'resolvePhotoSrc', 'mainPhoto', 'mainPhotoFields',
+    'checkPhotoFile', 'fitWithin', 'photoFileName', 'resolvePhotoSrc', 'initialPhotos', 'mainPhoto', 'galleryFields',
   ].map(fnSrc).join('\n') +
     ['PHOTO_TYPES', 'PHOTO_MAX_BYTES', 'PHOTO_MAX_SIDE'].map(constSrc).join('') +
-    'return { unformatPrice, formatPrice, reformatPriceInput, checkPhotoFile, fitWithin, photoFileName, resolvePhotoSrc, mainPhoto, mainPhotoFields, PHOTO_MAX_SIDE };'
+    'return { unformatPrice, formatPrice, reformatPriceInput, checkPhotoFile, fitWithin, photoFileName, resolvePhotoSrc, mainPhoto, galleryFields, PHOTO_MAX_SIDE };'
 )({ origin: 'https://glow-home.ir' }, {});
 
 // ---- prices -------------------------------------------------------------------
@@ -166,16 +166,17 @@ test('preview: old relative paths resolve from the site root, supabase.co photos
 });
 
 test('replacing the main photo moves photo_url and photos[0] together; the rest of the gallery stays', () => {
-  const { mainPhoto, mainPhotoFields } = fns;
+  const { mainPhoto, galleryFields } = fns;
   const rosha = { photo_url: 'images/rosha.jpg', photos: ['images/rosha.jpg', 'images/rosha-2.jpg', 'images/rosha-3.jpg'] };
   assert.equal(mainPhoto(rosha), 'images/rosha.jpg');
-  assert.equal(mainPhotoFields(rosha, 'images/rosha.jpg'), null); // unchanged → nothing sent
-  assert.deepEqual(mainPhotoFields(rosha, 'https://x/new.jpg'), {
+  assert.equal(galleryFields(rosha, [...rosha.photos]), null); // unchanged → nothing sent
+  assert.deepEqual(galleryFields(rosha, ['https://x/new.jpg', 'images/rosha-2.jpg', 'images/rosha-3.jpg']), {
     photo_url: 'https://x/new.jpg',
     photos: ['https://x/new.jpg', 'images/rosha-2.jpg', 'images/rosha-3.jpg'],
   });
   const noGallery = { photo_url: 'images/a.jpg', photos: [] };
-  assert.deepEqual(mainPhotoFields(noGallery, 'https://x/b.jpg'), { photo_url: 'https://x/b.jpg' });
+  assert.equal(galleryFields(noGallery, ['images/a.jpg']), null);
+  assert.deepEqual(galleryFields(noGallery, ['https://x/b.jpg']), { photo_url: 'https://x/b.jpg', photos: ['https://x/b.jpg'] });
   assert.equal(mainPhoto({ photo_url: null, photos: [] }), '');
 });
 
@@ -205,20 +206,19 @@ test('bucket migration uses exactly the products admin check', () => {
 });
 
 test('drag-and-drop: only the drop handler uploads (files are empty during dragover)', () => {
-  const wire = fnSrc('wirePhotoField');
+  const wire = fnSrc('wirePhotoGallery');
   const handler = (event) => {
-    const m = wire.match(new RegExp(`drop\\.addEventListener\\('${event}', \\(e?\\) => \\{?([\\s\\S]*?)\\n  \\}?\\);`));
-    assert.ok(m, `no ${event} handler on the drop box`);
+    const m = wire.match(new RegExp(`root\\.addEventListener\\('${event}', \\(e?\\) => \\{?([\\s\\S]*?)\\n  \\}?\\);`));
+    assert.ok(m, `no ${event} handler on the gallery`);
     return m[1];
   };
   const over = handler('dragover');
   assert.match(over, /e\.preventDefault\(\);/);
   assert.match(over, /classList\.add\('dragging'\)/);
-  assert.doesNotMatch(over, /upload\(|dataTransfer/);
+  assert.doesNotMatch(over, /addFiles\(|dataTransfer/);
   assert.match(handler('dragleave'), /classList\.remove\('dragging'\)/);
   const drop = handler('drop');
   assert.match(drop, /e\.preventDefault\(\);/);
   assert.match(drop, /classList\.remove\('dragging'\)/);
-  assert.match(drop, /e\.dataTransfer && e\.dataTransfer\.files\[0\]/);
-  assert.match(drop, /upload\(file\)/);
+  assert.match(drop, /addFiles\(e\.dataTransfer && e\.dataTransfer\.files\)/, 'every dropped file, not just the first');
 });
