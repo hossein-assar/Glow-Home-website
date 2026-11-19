@@ -2039,7 +2039,7 @@ function payByContactHtml() {
 }
 
 const SNAPP_PAY_MSG =
-  'برای خرید اقساطی با اسنپ‌پی، از طریق تلگرام، واتساپ یا اینستاگرام به سحر پیام بدهید تا خرید شما را با هم نهایی کنیم.';
+  'برای خرید اقساطی با اسنپ‌پی، از طریق تلگرام، واتساپ یا اینستاگرام پیام بدهید تا خرید شما را با هم نهایی کنیم.';
 
 /** Checkout's Snapp Pay banner: the logos (plain images), a line and the
  * بیشتر/بستن toggle (state.snappPayOpen). Open, it shows SNAPP_PAY_MSG and

@@ -24,7 +24,7 @@ const grab = (src, re) => {
 const fnSrc = (name) => grab(appJs, new RegExp(`function ${name}\\([\\s\\S]*?\\n}\\n`));
 const { COPY, ONLINE_PAYMENT } = new Function(dataJs + '\nreturn { COPY, ONLINE_PAYMENT };')();
 
-const MSG = 'برای خرید اقساطی با اسنپ‌پی، از طریق تلگرام، واتساپ یا اینستاگرام به سحر پیام بدهید تا خرید شما را با هم نهایی کنیم.';
+const MSG = 'برای خرید اقساطی با اسنپ‌پی، از طریق تلگرام، واتساپ یا اینستاگرام پیام بدهید تا خرید شما را با هم نهایی کنیم.';
 const WA_LINE = 'می‌خواهم به صورت اقساطی با اسنپ‌پی پرداخت کنم.';
 
 const CART_ROWS = [
@@ -171,6 +171,18 @@ test('open: «بستن», only the message and WhatsApp (main) → Telegram → 
   assert.ok(b.includes(`href="${COPY.telegramUrl}" target="_blank" rel="noopener noreferrer"`));
   assert.ok(b.includes(`href="${COPY.instagramUrl}" target="_blank" rel="noopener"`));
   assert.deepEqual(e.calls, [], 'no request, no render');
+});
+
+test('the banner and its prefilled WhatsApp line never name the owner («سحر»)', () => {
+  assert.doesNotMatch(MSG, /سحر/);
+  assert.doesNotMatch(WA_LINE, /سحر/);
+  assert.doesNotMatch(grab(appJs, /const SNAPP_PAY_MSG =\s*\n[^\n]*\n/), /سحر/);
+  assert.doesNotMatch(grab(appJs, /const SNAPP_PAY_WA_LINE = [^\n]*\n/), /سحر/);
+  const e = bannerEnv({ city: 'کرج' });
+  const html = e.snappPayBannerHtml();
+  assert.doesNotMatch(html.replace(/href="[^"]*"/g, ''), /سحر/, 'banner text');
+  const wa = body(html).match(/data-wa="snapp" href="([^"]*)"/)[1];
+  assert.doesNotMatch(textOf(wa), /سحر/, 'prefilled WhatsApp message');
 });
 
 test('the WhatsApp link: data.js number, the cart, the total and the instalment line', () => {

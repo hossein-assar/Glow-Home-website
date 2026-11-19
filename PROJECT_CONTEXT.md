@@ -252,7 +252,7 @@ decisions from code alone — read this before making structural changes.
   Pay logos (plain images, never links), the line "برای خرید اقساطی با
   اسنپ‌پی در ۴ قسط..." and a بیشتر/بستن toggle (`state.snappPayOpen`, same
   accordion pattern as the FAQ page's `state.faqOpen`). Open, it pushes the
-  page down and shows only `SNAPP_PAY_MSG` («...به سحر پیام بدهید تا خرید
+  page down and shows only `SNAPP_PAY_MSG` («...یا اینستاگرام پیام بدهید تا خرید
   شما را با هم نهایی کنیم.») and the checkout's own contact buttons,
   `contactLinksHtml()` (shared with `payByContactHtml()`): WhatsApp with the
   cart prefilled plus `SNAPP_PAY_WA_LINE` (`whatsAppHref('snapp')`, link
